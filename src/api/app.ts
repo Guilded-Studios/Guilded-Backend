@@ -1,6 +1,6 @@
 import cookieParser from "cookie-parser";
 import cors from "cors";
-import express from "express";
+import express, { type Express } from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { allowedOrigins } from "../config/env.js";
@@ -8,7 +8,7 @@ import { authRouter } from "./routes/auth.js";
 import { usersRouter } from "./routes/users.js";
 import { serversRouter } from "./routes/servers.js";
 import { messagesRouter } from "./routes/messages.js";
-export const app = express();
+export const app: Express = express();
 app.disable("x-powered-by");
 app.use(helmet());
 app.use(cors({

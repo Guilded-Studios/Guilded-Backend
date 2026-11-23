@@ -1,0 +1,250 @@
+import { Router, type Router as ExpressRouter } from "express";
+import { z } from "zod";
+import { prisma } from "../../lib/prisma.js";
+import { requireAuth } from "../middleware/auth.js";
+
+export const featuresRouter: ExpressRouter = Router();
+featuresRouter.use(requireAuth);
+const id = z.string().min(1).max(128);
+const memberOf = (serverId: string, userId: string) => prisma.serverMember.findUnique({ where: { serverId_userId: { serverId, userId } } });
+const elevated = (role?: string | null) => role === "OWNER" || role === "ADMIN";
+async function audit(serverId: string, actorId: string, action: string, targetId?: string, details?: unknown) {
+  await prisma.auditLog.create({ data: { serverId, actorId, action, targetId, ...(details === undefined ? {} : { details: details as object }) } });
+}
+async function can(serverId: string, userId: string, permission: string) {
+  const member = await memberOf(serverId, userId);
+  if (!member) return false;
+  if (member.role === "OWNER") return true;
+  if (member.role === "ADMIN") return true;
+  if (!member.roleId) return false;
+  const role = await prisma.serverRole.findUnique({ where: { id: member.roleId } });
+  const permissions = role?.permissions as Record<string, boolean> | undefined;
+  return permissions?.[permission] === true;
+}
+
+// Configurable server roles
+featuresRouter.get("/servers/:serverId/roles", async (req, res, next) => {
+  try {
+    if (!await memberOf(req.params.serverId, req.auth!.userId)) return res.status(404).json({ error: { message: "Server not found" } });
+    const roles = await prisma.serverRole.findMany({ where: { serverId: req.params.serverId }, orderBy: { position: "desc" } });
+    res.json({ roles });
+  } catch (e) { next(e); }
+});
+featuresRouter.post("/servers/:serverId/roles", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_ROLES")) return res.status(403).json({ error: { message: "You cannot manage roles" } });
+    const body = z.object({ name: z.string().trim().min(2).max(32), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), permissions: z.record(z.boolean()).default({}), position: z.number().int().min(0).max(1000).default(0) }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Invalid role details" } });
+    const role = await prisma.serverRole.create({ data: { serverId: req.params.serverId, ...body.data } });
+    await audit(req.params.serverId, req.auth!.userId, "ROLE_CREATED", role.id, { name: role.name });
+    res.status(201).json({ role });
+  } catch (e) { next(e); }
+});
+featuresRouter.patch("/servers/:serverId/roles/:roleId", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_ROLES")) return res.status(403).json({ error: { message: "You cannot manage roles" } });
+    const body = z.object({ name: z.string().trim().min(2).max(32).optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(), permissions: z.record(z.boolean()).optional(), position: z.number().int().min(0).max(1000).optional() }).strict().safeParse(req.body);
+    if (!body.success || !Object.keys(body.data || {}).length) return res.status(400).json({ error: { message: "Invalid role update" } });
+    const role = await prisma.serverRole.updateMany({ where: { id: req.params.roleId, serverId: req.params.serverId }, data: body.data });
+    if (!role.count) return res.status(404).json({ error: { message: "Role not found" } });
+    const updated = await prisma.serverRole.findUnique({ where: { id: req.params.roleId } });
+    await audit(req.params.serverId, req.auth!.userId, "ROLE_UPDATED", req.params.roleId);
+    res.json({ role: updated });
+  } catch (e) { next(e); }
+});
+featuresRouter.put("/servers/:serverId/members/:memberId/role", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_ROLES")) return res.status(403).json({ error: { message: "You cannot manage roles" } });
+    const body = z.object({ roleId: id.nullable() }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Invalid role assignment" } });
+    if (body.data.roleId && !await prisma.serverRole.findFirst({ where: { id: body.data.roleId, serverId: req.params.serverId } })) return res.status(404).json({ error: { message: "Role not found" } });
+    const updated = await prisma.serverMember.updateMany({ where: { id: req.params.memberId, serverId: req.params.serverId, role: "MEMBER" }, data: { roleId: body.data.roleId } });
+    if (!updated.count) return res.status(404).json({ error: { message: "Member not found or role is protected" } });
+    await audit(req.params.serverId, req.auth!.userId, "MEMBER_ROLE_CHANGED", req.params.memberId);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Real channel categories and channel permission overrides
+featuresRouter.get("/servers/:serverId/categories", async (req, res, next) => {
+  try {
+    if (!await memberOf(req.params.serverId, req.auth!.userId)) return res.status(404).json({ error: { message: "Server not found" } });
+    const categories = await prisma.channelCategory.findMany({ where: { serverId: req.params.serverId }, include: { channels: { orderBy: { position: "asc" } } }, orderBy: { position: "asc" } });
+    res.json({ categories });
+  } catch (e) { next(e); }
+});
+featuresRouter.post("/servers/:serverId/categories", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_CHANNELS")) return res.status(403).json({ error: { message: "You cannot manage channels" } });
+    const body = z.object({ name: z.string().trim().min(1).max(64) }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Category name is required" } });
+    const category = await prisma.channelCategory.create({ data: { serverId: req.params.serverId, name: body.data.name, position: await prisma.channelCategory.count({ where: { serverId: req.params.serverId } }) } });
+    await audit(req.params.serverId, req.auth!.userId, "CATEGORY_CREATED", category.id);
+    res.status(201).json({ category });
+  } catch (e) { next(e); }
+});
+featuresRouter.patch("/servers/:serverId/channels/:channelId/category", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_CHANNELS")) return res.status(403).json({ error: { message: "You cannot manage channels" } });
+    const body = z.object({ categoryId: id.nullable() }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Invalid category" } });
+    if (body.data.categoryId && !await prisma.channelCategory.findFirst({ where: { id: body.data.categoryId, serverId: req.params.serverId } })) return res.status(404).json({ error: { message: "Category not found" } });
+    const result = await prisma.channel.updateMany({ where: { id: req.params.channelId, serverId: req.params.serverId }, data: { categoryId: body.data.categoryId } });
+    if (!result.count) return res.status(404).json({ error: { message: "Channel not found" } });
+    await audit(req.params.serverId, req.auth!.userId, "CHANNEL_CATEGORY_CHANGED", req.params.channelId);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+featuresRouter.put("/servers/:serverId/channels/:channelId/permissions", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_CHANNELS")) return res.status(403).json({ error: { message: "You cannot manage channel permissions" } });
+    const body = z.object({ roleId: id.nullable().optional(), memberId: id.nullable().optional(), allow: z.record(z.boolean()), deny: z.record(z.boolean()) }).strict().refine(v => Boolean(v.roleId || v.memberId)).safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Choose a role or member and provide permission rules" } });
+    const channel = await prisma.channel.findFirst({ where: { id: req.params.channelId, serverId: req.params.serverId } });
+    if (!channel) return res.status(404).json({ error: { message: "Channel not found" } });
+    const override = await prisma.channelPermissionOverride.create({ data: { channelId: channel.id, roleId: body.data.roleId, memberId: body.data.memberId, allow: body.data.allow, deny: body.data.deny } });
+    await audit(req.params.serverId, req.auth!.userId, "CHANNEL_PERMISSIONS_UPDATED", channel.id);
+    res.status(201).json({ override });
+  } catch (e) { next(e); }
+});
+
+// Friends and private conversations
+featuresRouter.get("/friends", async (req, res, next) => {
+  try {
+    const userId = req.auth!.userId;
+    const [incoming, outgoing, accepted] = await Promise.all([
+      prisma.friendRequest.findMany({ where: { receiverId: userId, status: "PENDING" }, include: { sender: { select: { id: true, username: true, displayName: true } } } }),
+      prisma.friendRequest.findMany({ where: { senderId: userId, status: "PENDING" }, include: { receiver: { select: { id: true, username: true, displayName: true } } } }),
+      prisma.friendRequest.findMany({ where: { OR: [{ senderId: userId }, { receiverId: userId }], status: "ACCEPTED" }, include: { sender: { select: { id: true, username: true, displayName: true } }, receiver: { select: { id: true, username: true, displayName: true } } } })
+    ]);
+    res.json({ incoming, outgoing, friends: accepted.map(f => f.senderId === userId ? f.receiver : f.sender) });
+  } catch (e) { next(e); }
+});
+featuresRouter.post("/friends/requests", async (req, res, next) => {
+  try {
+    const body = z.object({ username: z.string().trim().min(3).max(32) }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Enter a valid username" } });
+    const target = await prisma.user.findUnique({ where: { username: body.data.username }, select: { id: true } });
+    if (!target || target.id === req.auth!.userId) return res.status(404).json({ error: { message: "User not found" } });
+    const existing = await prisma.friendRequest.findFirst({ where: { OR: [{ senderId: req.auth!.userId, receiverId: target.id }, { senderId: target.id, receiverId: req.auth!.userId }] } });
+    if (existing?.status === "ACCEPTED") return res.status(409).json({ error: { message: "You are already friends" } });
+    if (existing?.status === "PENDING" && existing.receiverId === req.auth!.userId) {
+      const accepted = await prisma.friendRequest.update({ where: { id: existing.id }, data: { status: "ACCEPTED" } });
+      return res.json({ request: accepted });
+    }
+    const request = await prisma.friendRequest.upsert({ where: { senderId_receiverId: { senderId: req.auth!.userId, receiverId: target.id } }, create: { senderId: req.auth!.userId, receiverId: target.id }, update: { status: "PENDING" } });
+    res.status(201).json({ request });
+  } catch (e) { next(e); }
+});
+featuresRouter.patch("/friends/requests/:requestId", async (req, res, next) => {
+  try {
+    const body = z.object({ status: z.enum(["ACCEPTED", "DECLINED"]) }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Invalid friend request action" } });
+    const result = await prisma.friendRequest.updateMany({ where: { id: req.params.requestId, receiverId: req.auth!.userId, status: "PENDING" }, data: { status: body.data.status } });
+    if (!result.count) return res.status(404).json({ error: { message: "Friend request not found" } });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+featuresRouter.post("/conversations", async (req, res, next) => {
+  try {
+    const body = z.object({ userId: id }).strict().safeParse(req.body);
+    if (!body.success || body.data.userId === req.auth!.userId) return res.status(400).json({ error: { message: "Choose another user" } });
+    const target = await prisma.user.findUnique({ where: { id: body.data.userId }, select: { id: true } });
+    if (!target) return res.status(404).json({ error: { message: "User not found" } });
+    const existing = await prisma.conversation.findFirst({ where: { AND: [{ members: { some: { userId: req.auth!.userId } } }, { members: { some: { userId: target.id } } }, { members: { every: { userId: { in: [req.auth!.userId, target.id] } } } }] }, include: { members: { include: { user: { select: { id: true, username: true, displayName: true } } } } } });
+    const conversation = existing ?? await prisma.conversation.create({ data: { members: { create: [{ userId: req.auth!.userId }, { userId: target.id }] } }, include: { members: { include: { user: { select: { id: true, username: true, displayName: true } } } } } });
+    res.status(existing ? 200 : 201).json({ conversation });
+  } catch (e) { next(e); }
+});
+featuresRouter.get("/conversations/:conversationId/messages", async (req, res, next) => {
+  try {
+    const member = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: req.params.conversationId, userId: req.auth!.userId } } });
+    if (!member) return res.status(404).json({ error: { message: "Conversation not found" } });
+    const messages = await prisma.directMessage.findMany({ where: { conversationId: req.params.conversationId }, orderBy: { createdAt: "asc" }, take: 100, include: { author: { select: { id: true, username: true, displayName: true } }, attachments: true } });
+    res.json({ messages });
+  } catch (e) { next(e); }
+});
+featuresRouter.post("/conversations/:conversationId/messages", async (req, res, next) => {
+  try {
+    const body = z.object({ content: z.string().trim().min(1).max(4000) }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Message must be 1–4000 characters" } });
+    const member = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: req.params.conversationId, userId: req.auth!.userId } } });
+    if (!member) return res.status(404).json({ error: { message: "Conversation not found" } });
+    const message = await prisma.directMessage.create({ data: { conversationId: req.params.conversationId, authorId: req.auth!.userId, content: body.data.content }, include: { author: { select: { id: true, username: true, displayName: true } } } });
+    res.status(201).json({ message });
+  } catch (e) { next(e); }
+});
+
+// Events and join applications
+featuresRouter.get("/servers/:serverId/events", async (req, res, next) => {
+  try {
+    if (!await memberOf(req.params.serverId, req.auth!.userId)) return res.status(404).json({ error: { message: "Server not found" } });
+    const events = await prisma.event.findMany({ where: { serverId: req.params.serverId }, orderBy: { startsAt: "asc" } });
+    res.json({ events });
+  } catch (e) { next(e); }
+});
+featuresRouter.post("/servers/:serverId/events", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_EVENTS")) return res.status(403).json({ error: { message: "You cannot create events" } });
+    const body = z.object({ title: z.string().trim().min(2).max(100), description: z.string().max(2000).optional(), location: z.string().max(200).optional(), startsAt: z.string().datetime(), endsAt: z.string().datetime().optional() }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Invalid event details" } });
+    const event = await prisma.event.create({ data: { serverId: req.params.serverId, creatorId: req.auth!.userId, ...body.data, startsAt: new Date(body.data.startsAt), ...(body.data.endsAt ? { endsAt: new Date(body.data.endsAt) } : {}) } });
+    await audit(req.params.serverId, req.auth!.userId, "EVENT_CREATED", event.id);
+    res.status(201).json({ event });
+  } catch (e) { next(e); }
+});
+featuresRouter.post("/servers/:serverId/applications", async (req, res, next) => {
+  try {
+    const body = z.object({ answers: z.record(z.string().max(2000)) }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Provide application answers" } });
+    if (await memberOf(req.params.serverId, req.auth!.userId)) return res.status(409).json({ error: { message: "You are already a member" } });
+    const application = await prisma.serverApplication.upsert({ where: { serverId_userId: { serverId: req.params.serverId, userId: req.auth!.userId } }, create: { serverId: req.params.serverId, userId: req.auth!.userId, answers: body.data.answers }, update: { answers: body.data.answers, status: "PENDING", reviewedAt: null, reviewedById: null } });
+    res.status(201).json({ application });
+  } catch (e) { next(e); }
+});
+featuresRouter.get("/servers/:serverId/applications", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_APPLICATIONS")) return res.status(403).json({ error: { message: "You cannot review applications" } });
+    const applications = await prisma.serverApplication.findMany({ where: { serverId: req.params.serverId }, include: { user: { select: { id: true, username: true, displayName: true } } }, orderBy: { createdAt: "desc" } });
+    res.json({ applications });
+  } catch (e) { next(e); }
+});
+featuresRouter.patch("/servers/:serverId/applications/:applicationId", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_APPLICATIONS")) return res.status(403).json({ error: { message: "You cannot review applications" } });
+    const body = z.object({ status: z.enum(["APPROVED", "REJECTED"]) }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Invalid application decision" } });
+    const app = await prisma.serverApplication.findFirst({ where: { id: req.params.applicationId, serverId: req.params.serverId } });
+    if (!app) return res.status(404).json({ error: { message: "Application not found" } });
+    await prisma.$transaction(async tx => {
+      await tx.serverApplication.update({ where: { id: app.id }, data: { status: body.data.status, reviewedById: req.auth!.userId, reviewedAt: new Date() } });
+      if (body.data.status === "APPROVED") await tx.serverMember.upsert({ where: { serverId_userId: { serverId: req.params.serverId, userId: app.userId } }, create: { serverId: req.params.serverId, userId: app.userId }, update: {} });
+    });
+    await audit(req.params.serverId, req.auth!.userId, "APPLICATION_REVIEWED", app.id, { status: body.data.status });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Moderation and audit history
+featuresRouter.get("/servers/:serverId/audit-log", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "VIEW_AUDIT_LOG")) return res.status(403).json({ error: { message: "You cannot view the audit log" } });
+    const entries = await prisma.auditLog.findMany({ where: { serverId: req.params.serverId }, orderBy: { createdAt: "desc" }, take: 100, include: { actor: { select: { username: true, displayName: true } } } });
+    res.json({ entries });
+  } catch (e) { next(e); }
+});
+featuresRouter.post("/servers/:serverId/moderation", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "MODERATE_MEMBERS")) return res.status(403).json({ error: { message: "You cannot moderate members" } });
+    const body = z.object({ userId: id, action: z.enum(["WARN", "KICK", "BAN", "UNBAN", "TIMEOUT"]), reason: z.string().max(500).optional(), expiresAt: z.string().datetime().optional() }).strict().safeParse(req.body);
+    if (!body.success || body.data.userId === req.auth!.userId) return res.status(400).json({ error: { message: "Invalid moderation action" } });
+    const target = await memberOf(req.params.serverId, body.data.userId);
+    if (target?.role === "OWNER") return res.status(403).json({ error: { message: "The server owner cannot be moderated" } });
+    if (body.data.action === "KICK" || body.data.action === "BAN" || body.data.action === "UNBAN") {
+      if (body.data.action !== "UNBAN" && target) await prisma.serverMember.delete({ where: { id: target.id } });
+    }
+    const record = await prisma.moderationRecord.create({ data: { serverId: req.params.serverId, actorId: req.auth!.userId, targetUserId: body.data.userId, action: body.data.action, reason: body.data.reason, expiresAt: body.data.expiresAt ? new Date(body.data.expiresAt) : null } });
+    await audit(req.params.serverId, req.auth!.userId, "MODERATION_" + body.data.action, body.data.userId, { reason: body.data.reason });
+    res.status(201).json({ record });
+  } catch (e) { next(e); }
+});

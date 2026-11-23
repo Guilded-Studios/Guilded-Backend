@@ -8,8 +8,8 @@ CREATE INDEX "ServerRole_serverId_position_idx" ON "ServerRole"("serverId","posi
 CREATE TABLE "ChannelCategory" ("id" TEXT NOT NULL,"serverId" TEXT NOT NULL,"name" TEXT NOT NULL,"position" INTEGER NOT NULL DEFAULT 0,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,CONSTRAINT "ChannelCategory_pkey" PRIMARY KEY ("id"));
 CREATE INDEX "ChannelCategory_serverId_position_idx" ON "ChannelCategory"("serverId","position");
 ALTER TABLE "Channel" ADD COLUMN "categoryId" TEXT;
-CREATE INDEX "ChannelPermissionOverride_channelId_idx" ON "ChannelPermissionOverride"("channelId");
 CREATE TABLE "ChannelPermissionOverride" ("id" TEXT NOT NULL,"channelId" TEXT NOT NULL,"roleId" TEXT,"memberId" TEXT,"allow" JSONB NOT NULL,"deny" JSONB NOT NULL,CONSTRAINT "ChannelPermissionOverride_pkey" PRIMARY KEY ("id"));
+CREATE INDEX "ChannelPermissionOverride_channelId_idx" ON "ChannelPermissionOverride"("channelId");
 ALTER TABLE "ServerMember" ADD COLUMN "roleId" TEXT;
 CREATE TABLE "FriendRequest" ("id" TEXT NOT NULL,"senderId" TEXT NOT NULL,"receiverId" TEXT NOT NULL,"status" "FriendRequestStatus" NOT NULL DEFAULT 'PENDING',"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"updatedAt" TIMESTAMP(3) NOT NULL,CONSTRAINT "FriendRequest_pkey" PRIMARY KEY ("id"));
 CREATE UNIQUE INDEX "FriendRequest_senderId_receiverId_key" ON "FriendRequest"("senderId","receiverId");

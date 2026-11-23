@@ -73,6 +73,31 @@ serversRouter.post("/join", async (request, response, next) => {
   } catch (error) { next(error); }
 });
 
+serversRouter.get("/:serverId/members", async (request, response, next) => {
+  try {
+    const params = serverParams.safeParse(request.params);
+    if (!params.success) {
+      response.status(400).json({ error: { code: "INVALID_SERVER_ID", message: "Invalid server ID" } });
+      return;
+    }
+    if (!await membership(params.data.serverId, request.auth!.userId)) {
+      response.status(404).json({ error: { code: "SERVER_NOT_FOUND", message: "Server not found" } });
+      return;
+    }
+    const members = await prisma.serverMember.findMany({
+      where: { serverId: params.data.serverId },
+      orderBy: [{ role: "asc" }, { joinedAt: "asc" }],
+      select: {
+        id: true,
+        role: true,
+        joinedAt: true,
+        user: { select: { id: true, username: true, displayName: true } }
+      }
+    });
+    response.json({ members });
+  } catch (error) { next(error); }
+});
+
 serversRouter.get("/:serverId", async (request, response, next) => {
   try {
     const params = serverParams.safeParse(request.params);

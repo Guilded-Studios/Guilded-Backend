@@ -1,10 +1,10 @@
-import { Router } from "express";
+import { Router, type Router as ExpressRouter } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
 import { createSessionToken, hashPassword, hashSessionToken, verifyPassword } from "../../lib/crypto.js";
 import { clearSessionCookie, SESSION_TTL_SECONDS, setSessionCookie } from "../../lib/session.js";
 import { requireAuth } from "../middleware/auth.js";
-export const authRouter = Router();
+export const authRouter: ExpressRouter = Router();
 const registerSchema = z.object({
   username: z.string().trim().min(3).max(32).regex(/^[a-zA-Z0-9_]+$/),
   displayName: z.string().trim().min(1).max(64).optional(),

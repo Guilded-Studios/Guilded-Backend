@@ -31,7 +31,7 @@ function publicUser(user: { id: string; username: string; displayName: string | 
 }
 
 async function supabaseAuth(path: string, body: Record<string, unknown>): Promise<{ response: globalThis.Response; data: SupabaseAuthResponse }> {
-  const response = await fetch(new URL(path, env.SUPABASE_URL), {
+  const response = await fetch(new URL(`/auth/v1/${path}`, env.SUPABASE_URL), {
     method: "POST",
     headers: { apikey: env.SUPABASE_ANON_KEY, "Content-Type": "application/json" },
     body: JSON.stringify(body)

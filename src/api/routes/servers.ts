@@ -1,9 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { Router } from "express";
+import { Router, type Router as ExpressRouter } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-export const serversRouter = Router();
+export const serversRouter: ExpressRouter = Router();
 serversRouter.use(requireAuth);
 const serverParams = z.object({ serverId: z.string().min(1) });
 async function membership(serverId: string, userId: string) {

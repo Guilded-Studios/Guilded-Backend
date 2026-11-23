@@ -6,6 +6,8 @@ import rateLimit from "express-rate-limit";
 import { allowedOrigins } from "../config/env.js";
 import { authRouter } from "./routes/auth.js";
 import { usersRouter } from "./routes/users.js";
+import { serversRouter } from "./routes/servers.js";
+import { messagesRouter } from "./routes/messages.js";
 export const app = express();
 app.disable("x-powered-by");
 app.use(helmet());
@@ -32,6 +34,8 @@ app.use("/api/v1/auth/register", authLimiter);
 app.use("/api/v1/auth/login", authLimiter);
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/users", usersRouter);
+app.use("/api/v1/servers", serversRouter);
+app.use("/api/v1/channels", messagesRouter);
 app.use((_request, response) => {
   response.status(404).json({ error: { code: "NOT_FOUND", message: "Route not found" } });
 });

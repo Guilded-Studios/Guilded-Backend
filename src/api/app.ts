@@ -21,14 +21,16 @@ app.use(cookieParser());
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 20,
-  standardHeaders: "draft-8",
+  standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: "RATE_LIMITED", message: "Too many authentication attempts. Try again later." } }
 });
 app.get("/api/v1/health", (_request, response) => {
   response.json({ status: "ok", service: "guilded-backend", timestamp: new Date().toISOString() });
 });
-app.use("/api/v1/auth", authLimiter, authRouter);
+app.use("/api/v1/auth/register", authLimiter);
+app.use("/api/v1/auth/login", authLimiter);
+app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/users", usersRouter);
 app.use((_request, response) => {
   response.status(404).json({ error: { code: "NOT_FOUND", message: "Route not found" } });

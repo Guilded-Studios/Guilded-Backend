@@ -33,6 +33,8 @@ The self-hostable backend for Guilded, a community communication platform. Each 
 | POST | /api/v1/servers/:serverId/channels | Create a channel (owner/admin) |
 | GET | /api/v1/channels/:channelId/messages | Read channel messages |
 | POST | /api/v1/channels/:channelId/messages | Send a channel message |
+| PATCH | /api/v1/channels/:channelId/messages/:messageId | Edit your own message |
+| DELETE | /api/v1/channels/:channelId/messages/:messageId | Delete your message or moderate a channel |
 
 All server and channel reads/writes verify membership. Server and channel creation is restricted to owners and administrators. Messages are limited to 4,000 characters, and message history supports cursor pagination.
 
@@ -42,7 +44,7 @@ Socket.IO connections require a valid session cookie. After connecting:
 
 - Emit channel:join with a channel ID to subscribe. The server checks membership before joining the room.
 - Emit channel:leave with a channel ID to leave a room.
-- Listen for message:new to receive new messages in joined channels.
+- Listen for message:new, message:update, and message:delete to receive message events in joined channels.
 - Emit system:ping to test the connection.
 
 The server only broadcasts messages to authorized channel rooms.

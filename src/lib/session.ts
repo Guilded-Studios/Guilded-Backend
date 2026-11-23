@@ -5,7 +5,7 @@ export const SESSION_TTL_SECONDS = env.SESSION_TTL_DAYS * 24 * 60 * 60;
 const cookieOptions = {
   httpOnly: true,
   secure: env.NODE_ENV === "production",
-  sameSite: "lax" as const,
+  sameSite: (env.NODE_ENV === "production" ? "none" : "lax") as "none" | "lax",
   path: "/"
 };
 export function setSessionCookie(response: Response, token: string): void {

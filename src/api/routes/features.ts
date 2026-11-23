@@ -248,3 +248,57 @@ featuresRouter.post("/servers/:serverId/moderation", async (req, res, next) => {
     res.status(201).json({ record });
   } catch (e) { next(e); }
 });
+
+
+// Reactions
+featuresRouter.post("/channels/:channelId/messages/:messageId/reactions", async (req, res, next) => {
+  try {
+    const body = z.object({ emoji: z.string().trim().min(1).max(32) }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Choose a valid reaction" } });
+    const message = await prisma.message.findFirst({ where: { id: req.params.messageId, channelId: req.params.channelId }, include: { channel: { select: { serverId: true } } } });
+    if (!message || !await memberOf(message.channel.serverId, req.auth!.userId)) return res.status(404).json({ error: { message: "Message not found" } });
+    const existing = await prisma.messageReaction.findUnique({ where: { messageId_userId_emoji: { messageId: message.id, userId: req.auth!.userId, emoji: body.data.emoji } } });
+    if (existing) await prisma.messageReaction.delete({ where: { id: existing.id } });
+    else await prisma.messageReaction.create({ data: { messageId: message.id, channelId: req.params.channelId, userId: req.auth!.userId, emoji: body.data.emoji } });
+    const reactions = await prisma.messageReaction.groupBy({ by: ["emoji"], where: { messageId: message.id }, _count: { _all: true } });
+    res.json({ reactions: reactions.map(item => ({ emoji: item.emoji, count: item._count._all })) });
+  } catch (e) { next(e); }
+});
+
+// Supabase Storage signed uploads. Configure SUPABASE_SERVICE_ROLE_KEY and GUILDED_STORAGE_BUCKET on the backend only.
+featuresRouter.post("/uploads/sign", async (req, res, next) => {
+  try {
+    const body = z.object({ fileName: z.string().trim().min(1).max(180), mimeType: z.string().min(1).max(120), size: z.number().int().positive().max(25 * 1024 * 1024), channelId: z.string().optional() }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Invalid upload details. Files must be 25 MB or smaller." } });
+    const allowed = /^(image\/(png|jpeg|gif|webp)|video\/(mp4|webm)|audio\/(mpeg|ogg|wav|webm)|application\/pdf|text\/plain)$/;
+    if (!allowed.test(body.data.mimeType)) return res.status(415).json({ error: { message: "This file type is not supported." } });
+    if (body.data.channelId) {
+      const channel = await prisma.channel.findUnique({ where: { id: body.data.channelId }, select: { serverId: true } });
+      if (!channel || !await memberOf(channel.serverId, req.auth!.userId)) return res.status(404).json({ error: { message: "Channel not found" } });
+    }
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const bucket = process.env.GUILDED_STORAGE_BUCKET || "guilded-uploads";
+    if (!url || !key) return res.status(503).json({ error: { message: "File uploads are not configured on this server yet." } });
+    const storageKey = req.auth!.userId + "/" + crypto.randomUUID() + "-" + body.data.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const signed = await fetch(url.replace(/\/$/, "") + "/storage/v1/object/upload/sign/" + encodeURIComponent(bucket) + "/" + storageKey.split("/").map(encodeURIComponent).join("/"), { method: "POST", headers: { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify({ upsert: false }) });
+    if (!signed.ok) return res.status(502).json({ error: { message: "Storage could not create an upload link." } });
+    const payload = await signed.json() as { url?: string; signedURL?: string; token?: string };
+    const signedPath = payload.url || payload.signedURL;
+    if (!signedPath) return res.status(502).json({ error: { message: "Storage returned an invalid upload link." } });
+    res.json({ storageKey, bucket, uploadUrl: signedPath.startsWith("http") ? signedPath : url.replace(/\/$/, "") + "/storage/v1" + signedPath, token: payload.token, fileName: body.data.fileName, mimeType: body.data.mimeType, size: body.data.size, channelId: body.data.channelId || null });
+  } catch (e) { next(e); }
+});
+featuresRouter.post("/uploads/complete", async (req, res, next) => {
+  try {
+    const body = z.object({ storageKey: z.string().min(1).max(500), fileName: z.string().min(1).max(180), mimeType: z.string().min(1).max(120), size: z.number().int().positive().max(25 * 1024 * 1024), channelId: z.string().optional(), messageId: z.string().optional() }).strict().safeParse(req.body);
+    if (!body.success || !body.data.storageKey.startsWith(req.auth!.userId + "/")) return res.status(400).json({ error: { message: "Invalid upload confirmation" } });
+    if (body.data.channelId) {
+      const channel = await prisma.channel.findUnique({ where: { id: body.data.channelId }, select: { serverId: true } });
+      if (!channel || !await memberOf(channel.serverId, req.auth!.userId)) return res.status(404).json({ error: { message: "Channel not found" } });
+    }
+    if (body.data.messageId && !await prisma.message.findFirst({ where: { id: body.data.messageId, authorId: req.auth!.userId } })) return res.status(404).json({ error: { message: "Message not found" } });
+    const attachment = await prisma.attachment.create({ data: { storageKey: body.data.storageKey, fileName: body.data.fileName, mimeType: body.data.mimeType, size: body.data.size, uploaderId: req.auth!.userId, channelId: body.data.channelId, messageId: body.data.messageId } });
+    res.status(201).json({ attachment });
+  } catch (e) { next(e); }
+});

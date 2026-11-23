@@ -3,7 +3,10 @@
   "version": "0.2.0",
   "type": "module",
   "license": "GPL-3.0-only",
-  "engines": { "node": ">=22.0.0", "pnpm": ">=9.0.0" },
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "prisma generate && tsc -p tsconfig.json",
@@ -12,7 +15,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "test": "tsx --test tests/crypto.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",

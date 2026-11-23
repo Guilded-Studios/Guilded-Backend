@@ -8,6 +8,7 @@ import { authRouter } from "./routes/auth.js";
 import { usersRouter } from "./routes/users.js";
 import { serversRouter } from "./routes/servers.js";
 import { messagesRouter } from "./routes/messages.js";
+import { featuresRouter } from "./routes/features.js";
 export const app: Express = express();
 app.disable("x-powered-by");
 app.use(helmet());
@@ -36,6 +37,7 @@ app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/users", usersRouter);
 app.use("/api/v1/servers", serversRouter);
 app.use("/api/v1/channels", messagesRouter);
+app.use("/api/v1", featuresRouter);
 app.use((_request, response) => {
   response.status(404).json({ error: { code: "NOT_FOUND", message: "Route not found" } });
 });

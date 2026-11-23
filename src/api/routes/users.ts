@@ -1,8 +1,8 @@
-import { Router } from "express";
+import { Router, type Router as ExpressRouter } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-export const usersRouter = Router();
+export const usersRouter: ExpressRouter = Router();
 usersRouter.use(requireAuth);
 usersRouter.patch("/me", async (request, response, next) => {
   try {

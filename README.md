@@ -2,7 +2,7 @@
 
 The self-hostable backend for Guilded, a community communication platform. Each operator runs their own instance and connects it to a PostgreSQL database they control. Supabase is supported but not required.
 
-> **Project status:** Active development. This release contains the backend foundation and account authentication. It is not yet a complete production chat platform.
+> **Project status:** Active development. This release includes account authentication, server membership, channels, text messaging, and authenticated realtime channel subscriptions. Direct messages, roles/permission customization, attachments, moderation tools, and additional platform services remain in development.
 
 ## Stack
 
@@ -16,16 +16,42 @@ The self-hostable backend for Guilded, a community communication platform. Each 
 
 ## Implemented API
 
-| Method | Endpoint | Purpose | Authentication |
-| --- | --- | --- | --- |
-| GET | /api/v1/health | Health check | No |
-| POST | /api/v1/auth/register | Create account and session | No |
-| POST | /api/v1/auth/login | Sign in and create session | No |
-| POST | /api/v1/auth/logout | Revoke current session | Cookie |
-| GET | /api/v1/auth/me | Get current account | Cookie |
-| PATCH | /api/v1/users/me | Update display name | Cookie |
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | /api/v1/health | Health check |
+| POST | /api/v1/auth/register | Create account and session |
+| POST | /api/v1/auth/login | Sign in and create session |
+| POST | /api/v1/auth/logout | Revoke current session |
+| GET | /api/v1/auth/me | Get current account |
+| PATCH | /api/v1/users/me | Update display name |
+| GET | /api/v1/servers | List joined servers |
+| POST | /api/v1/servers | Create a server and its general channel |
+| POST | /api/v1/servers/join | Join using an invite code |
+| GET | /api/v1/servers/:serverId | Get server and channel list |
+| PATCH | /api/v1/servers/:serverId | Update server name/description (owner/admin) |
+| POST | /api/v1/servers/:serverId/leave | Leave a server |
+| POST | /api/v1/servers/:serverId/channels | Create a channel (owner/admin) |
+| GET | /api/v1/channels/:channelId/messages | Read channel messages |
+| POST | /api/v1/channels/:channelId/messages | Send a channel message |
 
-Authentication uses a random opaque session token in an HTTP-only cookie. Only a SHA-256 hash of the token is stored in PostgreSQL. Passwords are hashed with scrypt; plaintext passwords are never stored. Cookies use SameSite=Lax and HttpOnly, and Secure in production. Registration and login are rate-limited. Socket.IO handshakes require a valid session cookie.
+All server and channel reads/writes verify membership. Server and channel creation is restricted to owners and administrators. Messages are limited to 4,000 characters, and message history supports cursor pagination.
+
+## Realtime events
+
+Socket.IO connections require a valid session cookie. After connecting:
+
+- Emit channel:join with a channel ID to subscribe. The server checks membership before joining the room.
+- Emit channel:leave with a channel ID to leave a room.
+- Listen for message:new to receive new messages in joined channels.
+- Emit system:ping to test the connection.
+
+The server only broadcasts messages to authorized channel rooms.
+
+## Authentication
+
+Authentication uses a random opaque session token in an HTTP-only cookie. Only a SHA-256 hash of the token is stored in PostgreSQL. Passwords are hashed with scrypt; plaintext passwords are never stored. Cookies use SameSite=Lax and HttpOnly, and Secure in production. Registration and login are rate-limited.
+
+For browser clients, send requests with credentials enabled, for example fetch(url, { credentials: "include" }). The frontend origin must be listed in CLIENT_ORIGINS.
 
 ## Self-hosting
 
@@ -64,36 +90,6 @@ The API listens on http://localhost:4000 by default.
 | DATABASE_URL | Connection string for your PostgreSQL database |
 
 Never commit .env, database passwords, API keys, signing secrets, or production credentials.
-
-## API examples
-
-Registration:
-
-```http
-POST /api/v1/auth/register
-Content-Type: application/json
-
-{
-  "username": "sample_user",
-  "displayName": "Sample User",
-  "email": "sample@example.com",
-  "password": "a-long-unique-password"
-}
-```
-
-Login:
-
-```http
-POST /api/v1/auth/login
-Content-Type: application/json
-
-{
-  "identifier": "sample_user",
-  "password": "a-long-unique-password"
-}
-```
-
-Browser clients must send requests with credentials enabled, for example fetch(url, { credentials: "include" }). The frontend origin must be listed in CLIENT_ORIGINS.
 
 ## Database and private infrastructure
 

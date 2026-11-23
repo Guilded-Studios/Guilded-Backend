@@ -5,15 +5,28 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+enum MemberRole {
+  OWNER
+  ADMIN
+  MODERATOR
+  MEMBER
+}
+enum ChannelType {
+  TEXT
+  ANNOUNCEMENT
+}
 model User {
-  id           String    @id @default(cuid())
-  username     String    @unique
+  id           String         @id @default(cuid())
+  username     String         @unique
   displayName  String?
-  email        String    @unique
+  email        String         @unique
   passwordHash String
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
   sessions     Session[]
+  ownedServers Server[]       @relation("ServerOwner")
+  memberships  ServerMember[]
+  messages     Message[]
 }
 model Session {
   id        String   @id @default(cuid())
@@ -24,4 +37,51 @@ model Session {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([userId])
   @@index([expiresAt])
+}
+model Server {
+  id          String         @id @default(cuid())
+  name        String
+  description String?
+  inviteCode  String         @unique
+  ownerId     String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  owner       User           @relation("ServerOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members     ServerMember[]
+  channels    Channel[]
+  @@index([ownerId])
+}
+model ServerMember {
+  id       String     @id @default(cuid())
+  serverId String
+  userId   String
+  role     MemberRole @default(MEMBER)
+  joinedAt DateTime   @default(now())
+  server   Server     @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([serverId, userId])
+  @@index([userId])
+}
+model Channel {
+  id        String      @id @default(cuid())
+  serverId  String
+  name      String
+  type      ChannelType @default(TEXT)
+  position  Int         @default(0)
+  createdAt DateTime    @default(now())
+  server    Server      @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  messages  Message[]
+  @@index([serverId, position])
+}
+model Message {
+  id        String   @id @default(cuid())
+  channelId String
+  authorId  String
+  content   String
+  createdAt DateTime @default(now())
+  editedAt  DateTime?
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  @@index([channelId, createdAt])
+  @@index([authorId])
 }

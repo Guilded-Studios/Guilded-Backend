@@ -1,0 +1,51 @@
+name: Baseline existing database
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type BASELINE to confirm this one-time database operation"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guilded-database-baseline
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    if: ${{ inputs.confirm == 'BASELINE' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Verify database secret is configured
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::The DATABASE_URL repository secret is missing."
+            exit 1
+          fi
+
+      - name: Mark existing schema migrations as applied
+        run: |
+          npx prisma migrate resolve --applied 20261123000000_init
+          npx prisma migrate resolve --applied 20261123001000_auth_sessions
+          npx prisma migrate resolve --applied 20261123002000_servers_channels_messages
+
+      - name: Apply remaining migrations
+        run: npx prisma migrate deploy

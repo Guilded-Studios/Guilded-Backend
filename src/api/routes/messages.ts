@@ -1,9 +1,9 @@
-import { Router } from "express";
+import { Router, type Router as ExpressRouter } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
 import { getRealtimeServer } from "../../lib/realtime.js";
 import { requireAuth } from "../middleware/auth.js";
-export const messagesRouter = Router();
+export const messagesRouter: ExpressRouter = Router();
 messagesRouter.use(requireAuth);
 
 messagesRouter.get("/:channelId/messages", async (request, response, next) => {

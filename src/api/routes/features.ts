@@ -9,7 +9,7 @@ const id = z.string().min(1).max(128);
 const memberOf = (serverId: string, userId: string) => prisma.serverMember.findUnique({ where: { serverId_userId: { serverId, userId } } });
 const elevated = (role?: string | null) => role === "OWNER" || role === "ADMIN";
 async function audit(serverId: string, actorId: string, action: string, targetId?: string, details?: unknown) {
-  await prisma.auditLog.create({ data: { serverId, actorId, action, targetId, ...(details === undefined ? {} : { details: details as object }) } });
+  await prisma.auditLog.create({ data: { serverId, actorId, action, targetId, ...(details === undefined ? {} : { details: details as never }) } });
 }
 async function can(serverId: string, userId: string, permission: string) {
   const member = await memberOf(serverId, userId);

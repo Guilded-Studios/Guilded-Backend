@@ -160,6 +160,73 @@ serversRouter.patch("/:serverId", async (request, response, next) => {
   } catch (error) { next(error); }
 });
 
+serversRouter.post("/:serverId/transfer-ownership", async (request, response, next) => {
+  try {
+    const params = serverParams.safeParse(request.params);
+    const body = z.object({ userId: z.string().min(1).max(128) }).strict().safeParse(request.body);
+    if (!params.success || !body.success) {
+      response.status(400).json({ error: { code: "VALIDATION_ERROR", message: "A valid member user ID is required" } });
+      return;
+    }
+    if (body.data.userId === request.auth!.userId) {
+      response.status(400).json({ error: { code: "INVALID_TRANSFER_TARGET", message: "You already own this server" } });
+      return;
+    }
+    const result = await prisma.$transaction(async (tx) => {
+      const server = await tx.server.findUnique({ where: { id: params.data.serverId }, select: { id: true, ownerId: true } });
+      if (!server || server.ownerId !== request.auth!.userId) return { status: 403 as const };
+      const target = await tx.serverMember.findUnique({
+        where: { serverId_userId: { serverId: server.id, userId: body.data.userId } },
+        select: { id: true }
+      });
+      if (!target) return { status: 404 as const };
+      await tx.server.update({ where: { id: server.id }, data: { ownerId: body.data.userId } });
+      await tx.serverMember.update({
+        where: { serverId_userId: { serverId: server.id, userId: request.auth!.userId } },
+        data: { role: "ADMIN" }
+      });
+      await tx.serverMember.update({
+        where: { serverId_userId: { serverId: server.id, userId: body.data.userId } },
+        data: { role: "OWNER", roleId: null }
+      });
+      await tx.auditLog.create({
+        data: { serverId: server.id, actorId: request.auth!.userId, action: "SERVER_OWNERSHIP_TRANSFERRED", targetId: body.data.userId }
+      });
+      return { status: 200 as const };
+    });
+    if (result.status === 403) {
+      response.status(403).json({ error: { code: "OWNER_ONLY", message: "Only the current server owner can transfer ownership" } });
+      return;
+    }
+    if (result.status === 404) {
+      response.status(404).json({ error: { code: "MEMBER_NOT_FOUND", message: "The new owner must already be a server member" } });
+      return;
+    }
+    response.json({ ok: true, ownerId: body.data.userId });
+  } catch (error) { next(error); }
+});
+
+serversRouter.delete("/:serverId", async (request, response, next) => {
+  try {
+    const params = serverParams.safeParse(request.params);
+    if (!params.success) {
+      response.status(400).json({ error: { code: "INVALID_SERVER_ID", message: "Invalid server ID" } });
+      return;
+    }
+    const server = await prisma.server.findUnique({ where: { id: params.data.serverId }, select: { id: true, ownerId: true } });
+    if (!server) {
+      response.status(404).json({ error: { code: "SERVER_NOT_FOUND", message: "Server not found" } });
+      return;
+    }
+    if (server.ownerId !== request.auth!.userId) {
+      response.status(403).json({ error: { code: "OWNER_ONLY", message: "Only the server owner can delete this server" } });
+      return;
+    }
+    await prisma.server.delete({ where: { id: server.id } });
+    response.status(204).end();
+  } catch (error) { next(error); }
+});
+
 serversRouter.post("/:serverId/leave", async (request, response, next) => {
   try {
     const params = serverParams.safeParse(request.params);

@@ -208,6 +208,24 @@ featuresRouter.get("/conversations", async (req, res, next) => {
 });
 featuresRouter.post("/conversations", async (req, res, next) => {
   try {
+    const groupBody = z.object({ userIds: z.array(id).min(2).max(24) }).strict().safeParse(req.body);
+    if (groupBody.success) {
+      const userIds = [...new Set(groupBody.data.userIds)];
+      if (userIds.length < 2 || userIds.length !== groupBody.data.userIds.length || userIds.includes(req.auth!.userId)) {
+        return res.status(400).json({ error: { message: "Choose at least two different friends." } });
+      }
+      const friends = await prisma.friendRequest.findMany({
+        where: { status: "ACCEPTED", OR: userIds.map(friendId => ({ senderId: req.auth!.userId, receiverId: friendId })).concat(userIds.map(friendId => ({ senderId: friendId, receiverId: req.auth!.userId }))) },
+        select: { senderId: true, receiverId: true }
+      });
+      const acceptedIds = new Set(friends.map(friend => friend.senderId === req.auth!.userId ? friend.receiverId : friend.senderId));
+      if (userIds.some(friendId => !acceptedIds.has(friendId))) return res.status(403).json({ error: { message: "Group chats can only include your accepted friends." } });
+      const conversation = await prisma.conversation.create({
+        data: { members: { create: [req.auth!.userId, ...userIds].map(userId => ({ userId })) } },
+        include: { members: { include: { user: { select: { id: true, username: true, tag: true, displayName: true } } } } }
+      });
+      return res.status(201).json({ conversation });
+    }
     const body = z.object({ userId: id }).strict().safeParse(req.body);
     if (!body.success || body.data.userId === req.auth!.userId) return res.status(400).json({ error: { message: "Choose another user" } });
     const target = await prisma.user.findUnique({ where: { id: body.data.userId }, select: { id: true } });

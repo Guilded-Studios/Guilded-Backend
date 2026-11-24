@@ -141,19 +141,46 @@ featuresRouter.get("/friends", async (req, res, next) => {
 featuresRouter.post("/friends/requests", async (req, res, next) => {
   try {
     const body = z.object({ username: z.string().trim().min(3).max(37) }).strict().safeParse(req.body);
-    if (!body.success) return res.status(400).json({ error: { message: "Enter a valid username" } });
-    const identity = /^([a-z0-9_]{3,32})#([0-9]{4})$/i.exec(body.data.username);
-    if (!identity) return res.status(400).json({ error: { message: "Enter the full username, including its four-digit #tag (example: player#4821)." } });
-    const target = await prisma.user.findUnique({ where: { username_tag: { username: identity[1]!.toLowerCase(), tag: identity[2]! } }, select: { id: true } });
-    if (!target || target.id === req.auth!.userId) return res.status(404).json({ error: { message: "User not found" } });
-    const existing = await prisma.friendRequest.findFirst({ where: { OR: [{ senderId: req.auth!.userId, receiverId: target.id }, { senderId: target.id, receiverId: req.auth!.userId }] } });
-    if (existing?.status === "ACCEPTED") return res.status(409).json({ error: { message: "You are already friends" } });
-    if (existing?.status === "PENDING" && existing.receiverId === req.auth!.userId) {
-      const accepted = await prisma.friendRequest.update({ where: { id: existing.id }, data: { status: "ACCEPTED" } });
-      return res.json({ request: accepted });
+    if (!body.success) return res.status(400).json({ error: { code: "INVALID_USERNAME", message: "Enter a username with its four-digit #tag, such as player#4821." } });
+
+    const identity = /^@?([a-z0-9_]{3,32})#([0-9]{4})$/i.exec(body.data.username);
+    if (!identity) return res.status(400).json({ error: { code: "INVALID_USERNAME_FORMAT", message: "Use the full username and four-digit tag in the format username#1234." } });
+
+    const target = await prisma.user.findUnique({
+      where: { username_tag: { username: identity[1]!.toLowerCase(), tag: identity[2]! } },
+      select: { id: true }
+    });
+    if (!target) return res.status(404).json({ error: { code: "USER_NOT_FOUND", message: "No Guilded account matches that username and tag. Check both parts and try again." } });
+    if (target.id === req.auth!.userId) return res.status(400).json({ error: { code: "CANNOT_ADD_SELF", message: "You cannot send a friend request to your own account." } });
+
+    const requests = await prisma.friendRequest.findMany({
+      where: { OR: [{ senderId: req.auth!.userId, receiverId: target.id }, { senderId: target.id, receiverId: req.auth!.userId }] },
+      orderBy: { updatedAt: "desc" }
+    });
+    const outgoing = requests.find(item => item.senderId === req.auth!.userId);
+    const incoming = requests.find(item => item.senderId === target.id);
+
+    if (requests.some(item => item.status === "ACCEPTED")) {
+      return res.status(409).json({ error: { code: "ALREADY_FRIENDS", message: "You are already friends with this account." } });
     }
-    const request = await prisma.friendRequest.upsert({ where: { senderId_receiverId: { senderId: req.auth!.userId, receiverId: target.id } }, create: { senderId: req.auth!.userId, receiverId: target.id }, update: { status: "PENDING" } });
-    res.status(201).json({ request });
+    if (outgoing?.status === "PENDING") {
+      return res.status(409).json({ error: { code: "REQUEST_ALREADY_SENT", message: "A friend request is already waiting for this person." } });
+    }
+    if (incoming?.status === "PENDING") {
+      const accepted = await prisma.friendRequest.update({ where: { id: incoming.id }, data: { status: "ACCEPTED" } });
+      return res.json({ request: accepted, autoAccepted: true });
+    }
+
+    // Reopen a declined request instead of creating a second, reversed relationship row.
+    const declined = outgoing || incoming;
+    const request = declined
+      ? await prisma.friendRequest.update({
+          where: { id: declined.id },
+          data: { senderId: req.auth!.userId, receiverId: target.id, status: "PENDING" }
+        })
+      : await prisma.friendRequest.create({ data: { senderId: req.auth!.userId, receiverId: target.id } });
+
+    return res.status(201).json({ request });
   } catch (e) { next(e); }
 });
 featuresRouter.patch("/friends/requests/:requestId", async (req, res, next) => {

@@ -316,3 +316,23 @@ featuresRouter.post("/uploads/complete", async (req, res, next) => {
     res.status(201).json({ attachment });
   } catch (e) { next(e); }
 });
+
+featuresRouter.get("/uploads/:attachmentId/url", async (req, res, next) => {
+  try {
+    const attachment = await prisma.attachment.findUnique({ where: { id: req.params.attachmentId }, include: { channel: { select: { serverId: true } }, directMessage: { select: { conversationId: true } } } });
+    if (!attachment) return res.status(404).json({ error: { message: "Attachment not found" } });
+    if (attachment.channel && !await memberOf(attachment.channel.serverId, req.auth!.userId)) return res.status(404).json({ error: { message: "Attachment not found" } });
+    if (attachment.directMessage && !await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: attachment.directMessage.conversationId, userId: req.auth!.userId } } })) return res.status(404).json({ error: { message: "Attachment not found" } });
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const bucket = process.env.GUILDED_STORAGE_BUCKET || "guilded-uploads";
+    if (!url || !key) return res.status(503).json({ error: { message: "File storage is not configured." } });
+    const path = attachment.storageKey.split("/").map(encodeURIComponent).join("/");
+    const signed = await fetch(url.replace(/\\/$/, "") + "/storage/v1/object/sign/" + encodeURIComponent(bucket) + "/" + path, { method: "POST", headers: { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify({ expiresIn: 3600 }) });
+    if (!signed.ok) return res.status(502).json({ error: { message: "Could not create a download link." } });
+    const payload = await signed.json() as { signedURL?: string; signedUrl?: string };
+    const signedPath = payload.signedURL || payload.signedUrl;
+    if (!signedPath) return res.status(502).json({ error: { message: "Storage returned an invalid download link." } });
+    res.json({ url: signedPath.startsWith("http") ? signedPath : url.replace(/\\/$/, "") + "/storage/v1" + signedPath, fileName: attachment.fileName });
+  } catch (e) { next(e); }
+});

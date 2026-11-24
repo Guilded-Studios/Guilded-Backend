@@ -174,6 +174,20 @@ serversRouter.post("/:serverId/leave", async (request, response, next) => {
   } catch (error) { next(error); }
 });
 
+serversRouter.delete("/:serverId/channels/:channelId", async (request, response, next) => {
+  try {
+    const params = serverParams.safeParse(request.params);
+    if (!params.success) { response.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid server or channel" } }); return; }
+    const member = await membership(params.data.serverId, request.auth!.userId);
+    if (!member || !canManage(member.role)) { response.status(403).json({ error: { code: "FORBIDDEN", message: "You cannot delete channels in this server" } }); return; }
+    const channel = await prisma.channel.findFirst({ where: { id: request.params.channelId, serverId: params.data.serverId }, select: { id: true } });
+    if (!channel) { response.status(404).json({ error: { code: "NOT_FOUND", message: "Channel not found" } }); return; }
+    await prisma.channel.delete({ where: { id: channel.id } });
+    await prisma.auditLog.create({ data: { serverId: params.data.serverId, actorId: request.auth!.userId, action: "CHANNEL_DELETED", targetId: channel.id } });
+    response.status(204).end();
+  } catch (error) { next(error); }
+});
+
 serversRouter.post("/:serverId/channels", async (request, response, next) => {
   try {
     const params = serverParams.safeParse(request.params);

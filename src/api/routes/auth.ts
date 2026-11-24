@@ -26,8 +26,8 @@ type SupabaseUser = {
 };
 type SupabaseAuthResponse = { user?: SupabaseUser | null; session?: unknown; msg?: string; message?: string };
 
-function publicUser(user: { id: string; username: string; tag: string; displayName: string | null; email: string; createdAt: Date }) {
-  return { id: user.id, username: user.username, tag: user.tag, discriminator: user.tag, displayName: user.displayName, email: user.email, createdAt: user.createdAt.toISOString() };
+function publicUser(user: { id: string; username: string; tag: string; displayName: string | null; email: string; bio?: string | null; pronouns?: string | null; customStatus?: string | null; avatarUrl?: string | null; bannerUrl?: string | null; profileVisibility?: string; createdAt: Date }) {
+  return { id: user.id, username: user.username, tag: user.tag, discriminator: user.tag, displayName: user.displayName, email: user.email, bio: user.bio ?? null, pronouns: user.pronouns ?? null, customStatus: user.customStatus ?? null, avatarUrl: user.avatarUrl ?? null, bannerUrl: user.bannerUrl ?? null, profileVisibility: user.profileVisibility ?? "EVERYONE", createdAt: user.createdAt.toISOString() };
 }
 
 async function supabaseAuth(path: string, body: Record<string, unknown>): Promise<{ response: globalThis.Response; data: SupabaseAuthResponse }> {
@@ -66,7 +66,7 @@ async function ensureGuildedUser(authUser: SupabaseUser, requested?: { username?
       return prisma.user.update({
         where: { id: linked.id },
         data: { email },
-        select: { id: true, username: true, tag: true, displayName: true, email: true, createdAt: true }
+        select: { id: true, username: true, tag: true, displayName: true, email: true, bio: true, pronouns: true, customStatus: true, avatarUrl: true, bannerUrl: true, profileVisibility: true, createdAt: true }
       });
     }
     return linked;
@@ -77,7 +77,7 @@ async function ensureGuildedUser(authUser: SupabaseUser, requested?: { username?
     return prisma.user.update({
       where: { id: byEmail.id },
       data: { supabaseId: authUser.id, passwordHash: null },
-      select: { id: true, username: true, tag: true, displayName: true, email: true, createdAt: true }
+      select: { id: true, username: true, tag: true, displayName: true, email: true, bio: true, pronouns: true, customStatus: true, avatarUrl: true, bannerUrl: true, profileVisibility: true, createdAt: true }
     });
   }
 

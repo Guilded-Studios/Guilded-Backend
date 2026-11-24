@@ -1,6 +1,6 @@
 # Guilded Backend
 
-The self-hostable backend for Guilded, a community communication platform. Each operator runs their own instance and connects it to a PostgreSQL database they control. Supabase is supported but not required.
+The self-hostable backend for Guilded, a community communication platform. Each operator runs their own instance and connects it to a PostgreSQL database they control. Supabase Auth is currently required for account registration and login; each operator manages their own PostgreSQL database.
 
 > **Project status:** Active development. The backend currently includes account authentication, server membership, channels, text messaging, realtime channel subscriptions, configurable roles and channel permissions, friends and direct messages, events and join applications, moderation records and audit logs, message reactions, and signed file uploads/downloads. These features still require deployment-level configuration and broader integration testing.
 

@@ -97,6 +97,20 @@ The API listens on http://localhost:4000 by default.
 
 Never commit .env, database passwords, API keys, signing secrets, or production credentials.
 
+## Supabase setup and automatic database deployment
+
+Guilded uses Prisma as the single source of truth for PostgreSQL migrations. Supabase-specific SQL that the backend needs is kept in the normal `prisma/migrations/` history so Prisma and the deployed database do not maintain two competing migration histories.
+
+1. Create or select the Supabase project used by this backend.
+2. Configure Supabase Auth in the Supabase Dashboard and enable the sign-in provider(s) your app uses. Auth provider settings are project configuration, not SQL migrations.
+3. Configure the backend environment variables from `.env.example`. Keep `SUPABASE_SERVICE_ROLE_KEY` server-side only.
+4. Add a GitHub Actions repository secret named `DATABASE_URL` containing the Supabase PostgreSQL **Session pooler** connection string (port 5432) or a supported direct connection string. Never commit this value or paste it into source files.
+5. After the database's existing migration history is correctly baselined, pushes to `main` that add files under `prisma/migrations/` automatically run `pnpm db:deploy` through `.github/workflows/deploy-database.yml`. The workflow can also be started manually from the Actions tab.
+
+The Supabase Storage migration creates the `guilded-uploads` bucket as **private**. The backend uses the server-only service role key to create signed upload and download URLs; do not make this bucket public or expose the service role key to the frontend.
+
+**Existing database warning:** do not run the one-time `Baseline existing database` workflow until you have confirmed which migrations are already represented in the live database. It marks the initial schema migrations as applied and then deploys the remaining migrations; running it against a database with a different schema/history can fail or leave migration history inconsistent. Do not use `supabase db reset --remote` on a database containing data you want to keep.
+
 ## Database and private infrastructure
 
 The Prisma schema and migrations describe the public database structure required by self-hosted instances. They are not Guilded Studios' production database, production records, credentials, or private operational tooling.

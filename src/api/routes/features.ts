@@ -53,6 +53,22 @@ featuresRouter.patch("/servers/:serverId/roles/:roleId", async (req, res, next) 
     res.json({ role: updated });
   } catch (e) { next(e); }
 });
+featuresRouter.delete("/servers/:serverId/roles/:roleId", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_ROLES")) {
+      return res.status(403).json({ error: { message: "You cannot manage roles" } });
+    }
+    const role = await prisma.serverRole.findFirst({
+      where: { id: req.params.roleId, serverId: req.params.serverId },
+      select: { id: true, name: true }
+    });
+    if (!role) return res.status(404).json({ error: { message: "Role not found" } });
+    await prisma.serverRole.delete({ where: { id: role.id } });
+    await audit(req.params.serverId, req.auth!.userId, "ROLE_DELETED", role.id, { name: role.name });
+    res.status(204).end();
+  } catch (e) { next(e); }
+});
+
 featuresRouter.put("/servers/:serverId/members/:memberId/role", async (req, res, next) => {
   try {
     if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_ROLES")) return res.status(403).json({ error: { message: "You cannot manage roles" } });

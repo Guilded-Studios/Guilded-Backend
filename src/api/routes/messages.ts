@@ -105,7 +105,11 @@ messagesRouter.patch("/:channelId/messages/:messageId", async (request, response
     const updated = await prisma.message.update({
       where: { id: message.id },
       data: { content: parsed.data.content, editedAt: new Date() },
-      include: { author: { select: { id: true, username: true, tag: true, displayName: true } } }
+      include: {
+        author: { select: { id: true, username: true, tag: true, displayName: true } },
+        attachments: true,
+        reactions: { select: { emoji: true, userId: true } }
+      }
     });
     getRealtimeServer()?.to("channel:" + message.channelId).emit("message:update", updated);
     response.json({ message: updated });

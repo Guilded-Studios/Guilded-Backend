@@ -255,15 +255,20 @@ featuresRouter.get("/servers/:serverId/audit-log", async (req, res, next) => {
 featuresRouter.post("/servers/:serverId/moderation", async (req, res, next) => {
   try {
     if (!await can(req.params.serverId, req.auth!.userId, "MODERATE_MEMBERS")) return res.status(403).json({ error: { message: "You cannot moderate members" } });
-    const body = z.object({ userId: id, action: z.enum(["WARN", "KICK", "BAN", "UNBAN", "TIMEOUT"]), reason: z.string().max(500).optional(), expiresAt: z.string().datetime().optional() }).strict().safeParse(req.body);
-    if (!body.success || body.data.userId === req.auth!.userId) return res.status(400).json({ error: { message: "Invalid moderation action" } });
-    const target = await memberOf(req.params.serverId, body.data.userId);
+    const body = z.object({ userId: id.optional(), username: z.string().trim().min(3).max(32).optional(), action: z.enum(["WARN", "KICK", "BAN", "UNBAN", "TIMEOUT"]), reason: z.string().max(500).optional(), expiresAt: z.string().datetime().optional() }).strict().refine(v => Boolean(v.userId || v.username)).safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Invalid moderation action" } });
+    const targetUser = body.data.userId
+      ? await prisma.user.findUnique({ where: { id: body.data.userId }, select: { id: true } })
+      : await prisma.user.findUnique({ where: { username: body.data.username! }, select: { id: true } });
+    if (!targetUser || targetUser.id === req.auth!.userId) return res.status(404).json({ error: { message: "Target user not found" } });
+    const target = await memberOf(req.params.serverId, targetUser.id);
     if (target?.role === "OWNER") return res.status(403).json({ error: { message: "The server owner cannot be moderated" } });
-    if (body.data.action === "KICK" || body.data.action === "BAN" || body.data.action === "UNBAN") {
-      if (body.data.action !== "UNBAN" && target) await prisma.serverMember.delete({ where: { id: target.id } });
+    if (body.data.action !== "UNBAN" && !target) return res.status(404).json({ error: { message: "Member not found" } });
+    if (body.data.action === "KICK" || body.data.action === "BAN") {
+      if (target) await prisma.serverMember.delete({ where: { id: target.id } });
     }
-    const record = await prisma.moderationRecord.create({ data: { serverId: req.params.serverId, actorId: req.auth!.userId, targetUserId: body.data.userId, action: body.data.action, reason: body.data.reason, expiresAt: body.data.expiresAt ? new Date(body.data.expiresAt) : null } });
-    await audit(req.params.serverId, req.auth!.userId, "MODERATION_" + body.data.action, body.data.userId, { reason: body.data.reason });
+    const record = await prisma.moderationRecord.create({ data: { serverId: req.params.serverId, actorId: req.auth!.userId, targetUserId: targetUser.id, action: body.data.action, reason: body.data.reason, expiresAt: body.data.expiresAt ? new Date(body.data.expiresAt) : null } });
+    await audit(req.params.serverId, req.auth!.userId, "MODERATION_" + body.data.action, targetUser.id, { reason: body.data.reason });
     res.status(201).json({ record });
   } catch (e) { next(e); }
 });

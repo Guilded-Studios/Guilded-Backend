@@ -63,7 +63,7 @@ usersRouter.post("/me/media/sign", async (request, response, next) => {
       response.status(502).json({ error: { code: "STORAGE_INVALID_RESPONSE", message: "Storage returned an invalid upload link." } });
       return;
     }
-    const uploadUrl = /^https?:\\/\\//i.test(signedPath)
+    const uploadUrl = signedPath.startsWith("https://") || signedPath.startsWith("http://")
       ? signedPath
       : new URL(signedPath.startsWith("/storage/v1/") ? signedPath : "/storage/v1" + (signedPath.startsWith("/") ? signedPath : "/" + signedPath), url).toString();
     response.json({

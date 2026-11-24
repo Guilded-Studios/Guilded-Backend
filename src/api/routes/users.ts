@@ -1,4 +1,4 @@
-import { randomInt } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { Router, type Router as ExpressRouter } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
@@ -21,6 +21,51 @@ usersRouter.get("/me", async (request, response, next) => {
       return;
     }
     response.json({ user: { ...user, createdAt: user.createdAt.toISOString() } });
+  } catch (error) { next(error); }
+});
+
+usersRouter.post("/me/media/sign", async (request, response, next) => {
+  try {
+    const parsed = z.object({
+      kind: z.enum(["avatar", "banner"]),
+      fileName: z.string().trim().min(1).max(180),
+      mimeType: z.enum(["image/jpeg", "image/png", "image/webp", "image/gif"]),
+      size: z.number().int().positive().max(10 * 1024 * 1024)
+    }).strict().safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({ error: { code: "INVALID_MEDIA", message: "Choose a JPG, PNG, WEBP, or GIF image up to 10 MB." } });
+      return;
+    }
+    const url = env.SUPABASE_URL.replace(/\/$/, "");
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!key) {
+      response.status(503).json({ error: { code: "STORAGE_NOT_CONFIGURED", message: "Profile image uploads are not configured on this server." } });
+      return;
+    }
+    const extension = ({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" } as const)[parsed.data.mimeType];
+    const storageKey = request.auth!.userId + "/" + parsed.data.kind + "/" + randomUUID() + "." + extension;
+    const bucket = "guilded-profile-media";
+    const signed = await fetch(url + "/storage/v1/object/upload/sign/" + bucket + "/" + storageKey.split("/").map(encodeURIComponent).join("/"), {
+      method: "POST",
+      headers: { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" },
+      body: JSON.stringify({ upsert: false })
+    });
+    if (!signed.ok) {
+      response.status(502).json({ error: { code: "STORAGE_SIGN_FAILED", message: "Storage could not create an upload link." } });
+      return;
+    }
+    const payload = await signed.json() as { url?: string; signedURL?: string; token?: string };
+    const signedPath = payload.url || payload.signedURL;
+    if (!signedPath) {
+      response.status(502).json({ error: { code: "STORAGE_INVALID_RESPONSE", message: "Storage returned an invalid upload link." } });
+      return;
+    }
+    response.json({
+      storageKey,
+      uploadUrl: signedPath.startsWith("http") ? signedPath : url + "/storage/v1" + signedPath,
+      publicUrl: url + "/storage/v1/object/public/" + bucket + "/" + storageKey.split("/").map(encodeURIComponent).join("/"),
+      mimeType: parsed.data.mimeType
+    });
   } catch (error) { next(error); }
 });
 

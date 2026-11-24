@@ -161,7 +161,7 @@ authRouter.post("/login", async (request, response, next) => {
     if (!identifier.includes("@")) {
       const match = /^([a-z0-9_]{3,32})#([0-9]{4})$/i.exec(identifier);
       if (match) {
-        localUser = await prisma.user.findUnique({ where: { username_tag: { username: match[1].toLowerCase(), tag: match[2] } }, select: { email: true } });
+        localUser = await prisma.user.findUnique({ where: { username_tag: { username: match[1]!.toLowerCase(), tag: match[2]! } }, select: { email: true } });
       } else {
         const matches = await prisma.user.findMany({ where: { username: identifier }, select: { email: true }, take: 2 });
         if (matches.length > 1) {

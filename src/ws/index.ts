@@ -27,7 +27,7 @@ export function attachRealtime(httpServer: HttpServer) {
     } catch { next(new Error("Unable to authenticate connection")); }
   });
   setRealtimeServer(io);
-  const activeUsers = new Map<string, { id: string; username: string; tag: string; displayName: string | null; sockets: Set<string> }>();
+  const activeUsers = new Map<string, { id: string; username: string; tag: string; displayName: string | null; status: 'ONLINE' | 'IDLE' | 'DND' | 'OFFLINE'; sockets: Set<string> }>();
   io.on("connection", async (socket) => {
     const profile = await prisma.user.findUnique({
       where: { id: socket.data.userId },
@@ -37,13 +37,20 @@ export function attachRealtime(httpServer: HttpServer) {
     let active = activeUsers.get(profile.id);
     const wasOffline = !active;
     if (!active) {
-      active = { ...profile, sockets: new Set<string>() };
+      active = { ...profile, status: 'ONLINE', sockets: new Set<string>() };
       activeUsers.set(profile.id, active);
     }
     active.sockets.add(socket.id);
     socket.emit("presence:snapshot", Array.from(activeUsers.values()).map(({ sockets, ...person }) => person));
-    if (wasOffline) io.emit("presence:update", { ...profile, status: "ONLINE" });
+    if (wasOffline) io.emit("presence:update", { ...profile, status: active.status });
     socket.emit("system:ready", { connected: true, userId: socket.data.userId });
+    socket.on("presence:set", (value: unknown) => {
+      if (value !== "ONLINE" && value !== "IDLE" && value !== "DND" && value !== "INVISIBLE") return;
+      const current = activeUsers.get(profile.id);
+      if (!current) return;
+      current.status = value === "INVISIBLE" ? "OFFLINE" : value;
+      io.emit("presence:update", { id: profile.id, username: profile.username, tag: profile.tag, displayName: profile.displayName, status: current.status });
+    });
     socket.on("channel:join", async (channelId: unknown, callback?: (result: { ok: boolean }) => void) => {
       if (typeof channelId !== "string" || channelId.length > 128) {
         callback?.({ ok: false });

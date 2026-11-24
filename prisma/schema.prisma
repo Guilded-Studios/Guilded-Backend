@@ -56,6 +56,7 @@ model User {
   receivedFriendRequests FriendRequest[] @relation("FriendRequestReceiver")
   conversations ConversationMember[]
   directMessages DirectMessage[]
+  directMessageReactions DirectMessageReaction[]
   createdEvents Event[]
   applications ServerApplication[]
   moderationActions ModerationRecord[] @relation("ModerationActor")
@@ -212,7 +213,20 @@ model DirectMessage {
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
   attachments Attachment[]
+  reactions DirectMessageReaction[]
   @@index([conversationId, createdAt])
+}
+model DirectMessageReaction {
+  id String @id @default(cuid())
+  directMessageId String
+  userId String
+  emoji String @db.VarChar(32)
+  createdAt DateTime @default(now())
+  directMessage DirectMessage @relation(fields: [directMessageId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([directMessageId, userId, emoji])
+  @@index([directMessageId])
+  @@index([userId])
 }
 model Event {
   id String @id @default(cuid())

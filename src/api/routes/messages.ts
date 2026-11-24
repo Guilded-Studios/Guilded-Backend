@@ -43,7 +43,7 @@ messagesRouter.get("/:channelId/messages", async (request, response, next) => {
       take: query.data.limit,
       ...(query.data.before ? { cursor: { id: query.data.before }, skip: 1 } : {}),
       orderBy: { createdAt: "desc" },
-      include: { author: { select: { id: true, username: true, displayName: true } } }
+      include: { author: { select: { id: true, username: true, displayName: true } }, attachments: true, reactions: { select: { emoji: true, userId: true } } }
     });
     response.json({ messages: messages.reverse(), hasMore: messages.length === query.data.limit });
   } catch (error) { next(error); }

@@ -292,13 +292,16 @@ featuresRouter.post("/channels/:channelId/messages/:messageId/reactions", async 
 // Supabase Storage signed uploads. Configure SUPABASE_SERVICE_ROLE_KEY and GUILDED_STORAGE_BUCKET on the backend only.
 featuresRouter.post("/uploads/sign", async (req, res, next) => {
   try {
-    const body = z.object({ fileName: z.string().trim().min(1).max(180), mimeType: z.string().min(1).max(120), size: z.number().int().positive().max(25 * 1024 * 1024), channelId: z.string().optional() }).strict().safeParse(req.body);
+    const body = z.object({ fileName: z.string().trim().min(1).max(180), mimeType: z.string().min(1).max(120), size: z.number().int().positive().max(25 * 1024 * 1024), channelId: z.string().optional(), conversationId: z.string().optional() }).strict().refine(value => Boolean(value.channelId) !== Boolean(value.conversationId)).safeParse(req.body);
     if (!body.success) return res.status(400).json({ error: { message: "Invalid upload details. Files must be 25 MB or smaller." } });
     const allowed = /^(image\/(png|jpeg|gif|webp)|video\/(mp4|webm)|audio\/(mpeg|ogg|wav|webm)|application\/pdf|text\/plain)$/;
     if (!allowed.test(body.data.mimeType)) return res.status(415).json({ error: { message: "This file type is not supported." } });
     if (body.data.channelId) {
       const channel = await prisma.channel.findUnique({ where: { id: body.data.channelId }, select: { serverId: true } });
       if (!channel || !await memberOf(channel.serverId, req.auth!.userId)) return res.status(404).json({ error: { message: "Channel not found" } });
+    }
+    if (body.data.conversationId && !await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: body.data.conversationId, userId: req.auth!.userId } } })) {
+      return res.status(404).json({ error: { message: "Conversation not found" } });
     }
     const url = process.env.SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -310,19 +313,21 @@ featuresRouter.post("/uploads/sign", async (req, res, next) => {
     const payload = await signed.json() as { url?: string; signedURL?: string; token?: string };
     const signedPath = payload.url || payload.signedURL;
     if (!signedPath) return res.status(502).json({ error: { message: "Storage returned an invalid upload link." } });
-    res.json({ storageKey, bucket, uploadUrl: signedPath.startsWith("http") ? signedPath : url.replace(/\/$/, "") + "/storage/v1" + signedPath, token: payload.token, fileName: body.data.fileName, mimeType: body.data.mimeType, size: body.data.size, channelId: body.data.channelId || null });
+    res.json({ storageKey, bucket, uploadUrl: signedPath.startsWith("http") ? signedPath : url.replace(/\/$/, "") + "/storage/v1" + signedPath, token: payload.token, fileName: body.data.fileName, mimeType: body.data.mimeType, size: body.data.size, channelId: body.data.channelId || null, conversationId: body.data.conversationId || null });
   } catch (e) { next(e); }
 });
 featuresRouter.post("/uploads/complete", async (req, res, next) => {
   try {
-    const body = z.object({ storageKey: z.string().min(1).max(500), fileName: z.string().min(1).max(180), mimeType: z.string().min(1).max(120), size: z.number().int().positive().max(25 * 1024 * 1024), channelId: z.string().optional(), messageId: z.string().optional() }).strict().safeParse(req.body);
+    const body = z.object({ storageKey: z.string().min(1).max(500), fileName: z.string().min(1).max(180), mimeType: z.string().min(1).max(120), size: z.number().int().positive().max(25 * 1024 * 1024), channelId: z.string().optional(), messageId: z.string().optional(), directMessageId: z.string().optional() }).strict().refine(value => !(value.messageId && value.directMessageId)).safeParse(req.body);
     if (!body.success || !body.data.storageKey.startsWith(req.auth!.userId + "/")) return res.status(400).json({ error: { message: "Invalid upload confirmation" } });
     if (body.data.channelId) {
       const channel = await prisma.channel.findUnique({ where: { id: body.data.channelId }, select: { serverId: true } });
       if (!channel || !await memberOf(channel.serverId, req.auth!.userId)) return res.status(404).json({ error: { message: "Channel not found" } });
     }
-    if (body.data.messageId && !await prisma.message.findFirst({ where: { id: body.data.messageId, authorId: req.auth!.userId } })) return res.status(404).json({ error: { message: "Message not found" } });
-    const attachment = await prisma.attachment.create({ data: { storageKey: body.data.storageKey, fileName: body.data.fileName, mimeType: body.data.mimeType, size: body.data.size, uploaderId: req.auth!.userId, channelId: body.data.channelId, messageId: body.data.messageId } });
+    if (body.data.messageId && !await prisma.message.findFirst({ where: { id: body.data.messageId, authorId: req.auth!.userId, channelId: body.data.channelId } })) return res.status(404).json({ error: { message: "Message not found" } });
+    if (body.data.directMessageId && !await prisma.directMessage.findFirst({ where: { id: body.data.directMessageId, authorId: req.auth!.userId, conversation: { members: { some: { userId: req.auth!.userId } } } } })) return res.status(404).json({ error: { message: "Direct message not found" } });
+    if (body.data.directMessageId && body.data.channelId) return res.status(400).json({ error: { message: "Choose one attachment destination" } });
+    const attachment = await prisma.attachment.create({ data: { storageKey: body.data.storageKey, fileName: body.data.fileName, mimeType: body.data.mimeType, size: body.data.size, uploaderId: req.auth!.userId, channelId: body.data.channelId, messageId: body.data.messageId, directMessageId: body.data.directMessageId } });
     res.status(201).json({ attachment });
   } catch (e) { next(e); }
 });

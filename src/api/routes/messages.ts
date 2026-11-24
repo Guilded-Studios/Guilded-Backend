@@ -17,6 +17,10 @@ async function hasChannelPermission(channelId: string, serverId: string, userId:
   if (rolePermissions && Object.prototype.hasOwnProperty.call(rolePermissions, permission) && rolePermissions[permission] === false) return false;
   if (rolePermissions?.[permission] === true) return true;
   if (member.role === "MODERATOR" && permission === "MANAGE_MESSAGES") return true;
+  if (permission === "SEND_MESSAGES") {
+    const timeout = await prisma.moderationRecord.findFirst({ where: { serverId, targetUserId: userId, action: "TIMEOUT" }, orderBy: { createdAt: "desc" } });
+    if (timeout && (!timeout.expiresAt || timeout.expiresAt > new Date())) return false;
+  }
   const overrides = await prisma.channelPermissionOverride.findMany({
     where: { channelId, OR: [{ memberId: userId }, ...(member.roleId ? [{ roleId: member.roleId }] : [])] }
   });

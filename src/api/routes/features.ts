@@ -17,7 +17,7 @@ async function can(serverId: string, userId: string, permission: string) {
   if (member.role === "OWNER") return true;
   if (member.role === "ADMIN") return true;
   if (!member.roleId) return false;
-  const role = await prisma.serverRole.findUnique({ where: { id: member.roleId } });
+  const role = await prisma.serverRole.findFirst({ where: { id: member.roleId, serverId } });
   const permissions = role?.permissions as Record<string, boolean> | undefined;
   return permissions?.[permission] === true;
 }

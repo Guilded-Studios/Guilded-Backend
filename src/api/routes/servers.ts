@@ -98,6 +98,7 @@ serversRouter.get("/:serverId/members", async (request, response, next) => {
       select: {
         id: true,
         role: true,
+        roleId: true,
         joinedAt: true,
         user: { select: { id: true, username: true, displayName: true } }
       }
@@ -118,7 +119,7 @@ serversRouter.get("/:serverId", async (request, response, next) => {
       where: { id: params.data.serverId },
       select: {
         id: true, name: true, description: true, ownerId: true, inviteCode: true, createdAt: true,
-        channels: { orderBy: { position: "asc" }, select: { id: true, name: true, type: true, position: true } },
+        channels: { orderBy: { position: "asc" }, select: { id: true, name: true, type: true, position: true, categoryId: true } },
         _count: { select: { members: true } }
       }
     });

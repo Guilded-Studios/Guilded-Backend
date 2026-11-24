@@ -261,7 +261,7 @@ featuresRouter.post("/servers/:serverId/moderation", async (req, res, next) => {
     if (!body.success) return res.status(400).json({ error: { message: "Invalid moderation action" } });
     const targetUser = body.data.userId
       ? await prisma.user.findUnique({ where: { id: body.data.userId }, select: { id: true } })
-      : await (async () => { const identity = /^([a-z0-9_]{3,32})#([0-9]{4})$/i.exec(body.data.username!); return identity ? prisma.user.findUnique({ where: { username_tag: { username: identity[1].toLowerCase(), tag: identity[2] } }, select: { id: true } }) : null; })();
+      : await (async () => { const identity = /^([a-z0-9_]{3,32})#([0-9]{4})$/i.exec(body.data.username!); return identity ? prisma.user.findUnique({ where: { username_tag: { username: identity[1]!.toLowerCase(), tag: identity[2]! } }, select: { id: true } }) : null; })();
     if (!targetUser || targetUser.id === req.auth!.userId) return res.status(404).json({ error: { message: "Target user not found" } });
     const target = await memberOf(req.params.serverId, targetUser.id);
     if (target?.role === "OWNER") return res.status(403).json({ error: { message: "The server owner cannot be moderated" } });

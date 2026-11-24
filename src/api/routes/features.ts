@@ -1,6 +1,7 @@
 import { Router, type Router as ExpressRouter } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
+import { getRealtimeServer } from "../../lib/realtime.js";
 import { requireAuth } from "../middleware/auth.js";
 
 export const featuresRouter: ExpressRouter = Router();
@@ -326,7 +327,18 @@ featuresRouter.post("/channels/:channelId/messages/:messageId/reactions", async 
     const existing = await prisma.messageReaction.findUnique({ where: { messageId_userId_emoji: { messageId: message.id, userId: req.auth!.userId, emoji: body.data.emoji } } });
     if (existing) await prisma.messageReaction.delete({ where: { id: existing.id } });
     else await prisma.messageReaction.create({ data: { messageId: message.id, channelId: req.params.channelId, userId: req.auth!.userId, emoji: body.data.emoji } });
-    const reactions = await prisma.messageReaction.groupBy({ by: ["emoji"], where: { messageId: message.id }, _count: { _all: true } });
+    const [reactions, updatedMessage] = await Promise.all([
+      prisma.messageReaction.groupBy({ by: ["emoji"], where: { messageId: message.id }, _count: { _all: true } }),
+      prisma.message.findUnique({
+        where: { id: message.id },
+        include: {
+          author: { select: { id: true, username: true, tag: true, displayName: true } },
+          attachments: true,
+          reactions: { select: { emoji: true, userId: true } }
+        }
+      })
+    ]);
+    if (updatedMessage) getRealtimeServer()?.to("channel:" + req.params.channelId).emit("message:update", updatedMessage);
     res.json({ reactions: reactions.map(item => ({ emoji: item.emoji, count: item._count._all })) });
   } catch (e) { next(e); }
 });

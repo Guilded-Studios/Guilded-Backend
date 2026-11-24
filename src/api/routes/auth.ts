@@ -26,8 +26,8 @@ type SupabaseUser = {
 };
 type SupabaseAuthResponse = { user?: SupabaseUser | null; session?: unknown; msg?: string; message?: string };
 
-function publicUser(user: { id: string; username: string; displayName: string | null; email: string; createdAt: Date }) {
-  return { id: user.id, username: user.username, displayName: user.displayName, email: user.email, createdAt: user.createdAt.toISOString() };
+function publicUser(user: { id: string; username: string; tag: string; displayName: string | null; email: string; createdAt: Date }) {
+  return { id: user.id, username: user.username, tag: user.tag, discriminator: user.tag, displayName: user.displayName, email: user.email, createdAt: user.createdAt.toISOString() };
 }
 
 async function supabaseAuth(path: string, body: Record<string, unknown>): Promise<{ response: globalThis.Response; data: SupabaseAuthResponse }> {
@@ -45,20 +45,17 @@ function metadataString(user: SupabaseUser, key: string): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-async function uniqueUsername(preferred: string, supabaseId: string): Promise<string> {
-  const normalized = preferred.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^_+|_+$/g, "").slice(0, 32);
-  const base = normalized.length >= 3 ? normalized : `member_${supabaseId.slice(0, 8)}`;
+async function generateUsernameTag(username: string): Promise<string> {
   for (let attempt = 0; attempt < 100; attempt++) {
-    const suffix = attempt === 0 ? "" : `_${attempt + 1}`;
-    const candidate = base.slice(0, 32 - suffix.length) + suffix;
-    const existing = await prisma.user.findUnique({ where: { username: candidate }, select: { id: true } });
-    if (!existing) return candidate;
+    const tag = String(1000 + Math.floor(Math.random() * 9000));
+    const existing = await prisma.user.findUnique({ where: { username_tag: { username, tag } }, select: { id: true } });
+    if (!existing) return tag;
   }
-  throw new Error("Unable to allocate a unique Guilded username");
+  throw new Error("Unable to allocate a unique username tag");
 }
 
 async function ensureGuildedUser(authUser: SupabaseUser, requested?: { username?: string; displayName?: string }): Promise<{
-  id: string; username: string; displayName: string | null; email: string; createdAt: Date;
+  id: string; username: string; tag: string; displayName: string | null; email: string; createdAt: Date;
 }> {
   const email = authUser.email?.toLowerCase();
   if (!email) throw new Error("Supabase did not return an email address");
@@ -69,7 +66,7 @@ async function ensureGuildedUser(authUser: SupabaseUser, requested?: { username?
       return prisma.user.update({
         where: { id: linked.id },
         data: { email },
-        select: { id: true, username: true, displayName: true, email: true, createdAt: true }
+        select: { id: true, username: true, tag: true, displayName: true, email: true, createdAt: true }
       });
     }
     return linked;
@@ -80,7 +77,7 @@ async function ensureGuildedUser(authUser: SupabaseUser, requested?: { username?
     return prisma.user.update({
       where: { id: byEmail.id },
       data: { supabaseId: authUser.id, passwordHash: null },
-      select: { id: true, username: true, displayName: true, email: true, createdAt: true }
+      select: { id: true, username: true, tag: true, displayName: true, email: true, createdAt: true }
     });
   }
 
@@ -89,10 +86,11 @@ async function ensureGuildedUser(authUser: SupabaseUser, requested?: { username?
     ?? email.split("@")[0]
     ?? "member";
   const displayName = requested?.displayName ?? metadataString(authUser, "display_name") ?? null;
-  const username = await uniqueUsername(preferredUsername, authUser.id);
+  const username = preferredUsername.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^_+|_+$/g, "").slice(0, 32) || `member_${authUser.id.slice(0, 8)}`;
+  const tag = await generateUsernameTag(username);
   return prisma.user.create({
-    data: { username, email, displayName, supabaseId: authUser.id, passwordHash: null },
-    select: { id: true, username: true, displayName: true, email: true, createdAt: true }
+    data: { username, tag, email, displayName, supabaseId: authUser.id, passwordHash: null },
+    select: { id: true, username: true, tag: true, displayName: true, email: true, createdAt: true }
   });
 }
 
@@ -113,9 +111,9 @@ authRouter.post("/register", async (request, response, next) => {
     }
     const username = parsed.data.username.toLowerCase();
     const email = parsed.data.email.toLowerCase();
-    const existing = await prisma.user.findFirst({ where: { OR: [{ username }, { email }] }, select: { id: true } });
+    const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
     if (existing) {
-      response.status(409).json({ error: { code: "ACCOUNT_EXISTS", message: "That username or email is already in use" } });
+      response.status(409).json({ error: { code: "ACCOUNT_EXISTS", message: "That email is already in use" } });
       return;
     }
 
@@ -159,9 +157,20 @@ authRouter.post("/login", async (request, response, next) => {
     }
 
     const identifier = parsed.data.identifier.toLowerCase();
-    const localUser = identifier.includes("@")
-      ? null
-      : await prisma.user.findUnique({ where: { username: identifier } });
+    let localUser: { email: string } | null = null;
+    if (!identifier.includes("@")) {
+      const match = /^([a-z0-9_]{3,32})#([0-9]{4})$/i.exec(identifier);
+      if (match) {
+        localUser = await prisma.user.findUnique({ where: { username_tag: { username: match[1].toLowerCase(), tag: match[2] } }, select: { email: true } });
+      } else {
+        const matches = await prisma.user.findMany({ where: { username: identifier }, select: { email: true }, take: 2 });
+        if (matches.length > 1) {
+          response.status(400).json({ error: { code: "TAG_REQUIRED", message: "Enter your full username, including the four-digit #tag, or use your email address." } });
+          return;
+        }
+        localUser = matches[0] ?? null;
+      }
+    }
     const email = localUser?.email ?? identifier;
     const { response: authResponse, data } = await supabaseAuth("token?grant_type=password", {
       email,
@@ -195,7 +204,7 @@ authRouter.get("/me", requireAuth, async (request, response, next) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: request.auth!.userId },
-      select: { id: true, username: true, displayName: true, email: true, createdAt: true }
+      select: { id: true, username: true, tag: true, displayName: true, email: true, createdAt: true }
     });
     if (!user) {
       response.status(401).json({ error: { code: "UNAUTHENTICATED", message: "Account no longer exists" } });

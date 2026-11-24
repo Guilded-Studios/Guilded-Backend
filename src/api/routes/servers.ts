@@ -64,6 +64,14 @@ serversRouter.post("/join", async (request, response, next) => {
       response.status(404).json({ error: { code: "INVITE_NOT_FOUND", message: "That invite is invalid or expired" } });
       return;
     }
+    const latestBan = await prisma.moderationRecord.findFirst({
+      where: { serverId: server.id, targetUserId: request.auth!.userId, action: { in: ["BAN", "UNBAN"] } },
+      orderBy: { createdAt: "desc" }
+    });
+    if (latestBan?.action === "BAN" && (!latestBan.expiresAt || latestBan.expiresAt > new Date())) {
+      response.status(403).json({ error: { code: "SERVER_BANNED", message: "You are banned from this server." } });
+      return;
+    }
     await prisma.serverMember.upsert({
       where: { serverId_userId: { serverId: server.id, userId: request.auth!.userId } },
       create: { serverId: server.id, userId: request.auth!.userId, role: "MEMBER" },

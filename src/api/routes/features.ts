@@ -83,6 +83,19 @@ featuresRouter.post("/servers/:serverId/categories", async (req, res, next) => {
     res.status(201).json({ category });
   } catch (e) { next(e); }
 });
+featuresRouter.delete("/servers/:serverId/categories/:categoryId", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_CHANNELS")) return res.status(403).json({ error: { message: "You cannot manage channels" } });
+    const category = await prisma.channelCategory.findFirst({ where: { id: req.params.categoryId, serverId: req.params.serverId }, select: { id: true } });
+    if (!category) return res.status(404).json({ error: { message: "Category not found" } });
+    await prisma.$transaction([
+      prisma.channel.updateMany({ where: { serverId: req.params.serverId, categoryId: category.id }, data: { categoryId: null } }),
+      prisma.channelCategory.delete({ where: { id: category.id } })
+    ]);
+    await audit(req.params.serverId, req.auth!.userId, "CATEGORY_DELETED", category.id);
+    res.status(204).end();
+  } catch (e) { next(e); }
+});
 featuresRouter.patch("/servers/:serverId/channels/:channelId/category", async (req, res, next) => {
   try {
     if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_CHANNELS")) return res.status(403).json({ error: { message: "You cannot manage channels" } });

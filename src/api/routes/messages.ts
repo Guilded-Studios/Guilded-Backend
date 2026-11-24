@@ -6,6 +6,25 @@ import { requireAuth } from "../middleware/auth.js";
 export const messagesRouter: ExpressRouter = Router();
 messagesRouter.use(requireAuth);
 
+async function hasChannelPermission(channelId: string, serverId: string, userId: string, permission: string): Promise<boolean> {
+  const member = await prisma.serverMember.findUnique({
+    where: { serverId_userId: { serverId, userId } },
+    include: { customRole: true }
+  });
+  if (!member) return false;
+  if (member.role === "OWNER" || member.role === "ADMIN") return true;
+  const rolePermissions = member.customRole?.permissions as Record<string, boolean> | undefined;
+  if (rolePermissions && Object.prototype.hasOwnProperty.call(rolePermissions, permission) && rolePermissions[permission] === false) return false;
+  if (rolePermissions?.[permission] === true) return true;
+  if (member.role === "MODERATOR" && permission === "MANAGE_MESSAGES") return true;
+  const overrides = await prisma.channelPermissionOverride.findMany({
+    where: { channelId, OR: [{ memberId: userId }, ...(member.roleId ? [{ roleId: member.roleId }] : [])] }
+  });
+  if (overrides.some(override => (override.deny as Record<string, boolean>)[permission] === true)) return false;
+  if (overrides.some(override => (override.allow as Record<string, boolean>)[permission] === true)) return true;
+  return true;
+}
+
 messagesRouter.get("/:channelId/messages", async (request, response, next) => {
   try {
     const params = z.object({ channelId: z.string().min(1) }).safeParse(request.params);
@@ -15,10 +34,7 @@ messagesRouter.get("/:channelId/messages", async (request, response, next) => {
       return;
     }
     const channel = await prisma.channel.findUnique({ where: { id: params.data.channelId }, select: { serverId: true } });
-    if (!channel || !await prisma.serverMember.findUnique({
-      where: { serverId_userId: { serverId: channel.serverId, userId: request.auth!.userId } },
-      select: { id: true }
-    })) {
+    if (!channel || !await hasChannelPermission(params.data.channelId, channel.serverId, request.auth!.userId, "READ_MESSAGES")) {
       response.status(404).json({ error: { code: "CHANNEL_NOT_FOUND", message: "Channel not found" } });
       return;
     }
@@ -42,10 +58,7 @@ messagesRouter.post("/:channelId/messages", async (request, response, next) => {
       return;
     }
     const channel = await prisma.channel.findUnique({ where: { id: params.data.channelId }, select: { id: true, serverId: true } });
-    if (!channel || !await prisma.serverMember.findUnique({
-      where: { serverId_userId: { serverId: channel.serverId, userId: request.auth!.userId } },
-      select: { id: true }
-    })) {
+    if (!channel || !await hasChannelPermission(channel.id, channel.serverId, request.auth!.userId, "SEND_MESSAGES")) {
       response.status(404).json({ error: { code: "CHANNEL_NOT_FOUND", message: "Channel not found" } });
       return;
     }
@@ -77,7 +90,7 @@ messagesRouter.patch("/:channelId/messages/:messageId", async (request, response
     const member = await prisma.serverMember.findUnique({
       where: { serverId_userId: { serverId: message.channel.serverId, userId: request.auth!.userId } }
     });
-    if (!member) {
+    if (!member || !await hasChannelPermission(message.channelId, message.channel.serverId, request.auth!.userId, "SEND_MESSAGES")) {
       response.status(404).json({ error: { code: "MESSAGE_NOT_FOUND", message: "Message not found" } });
       return;
     }
@@ -117,7 +130,8 @@ messagesRouter.delete("/:channelId/messages/:messageId", async (request, respons
       response.status(404).json({ error: { code: "MESSAGE_NOT_FOUND", message: "Message not found" } });
       return;
     }
-    const canModerate = member.role === "OWNER" || member.role === "ADMIN" || member.role === "MODERATOR";
+    const canModerate = member.role === "OWNER" || member.role === "ADMIN" || member.role === "MODERATOR" ||
+      await hasChannelPermission(message.channelId, message.channel.serverId, request.auth!.userId, "MANAGE_MESSAGES");
     if (message.authorId !== request.auth!.userId && !canModerate) {
       response.status(403).json({ error: { code: "FORBIDDEN", message: "You cannot delete this message" } });
       return;

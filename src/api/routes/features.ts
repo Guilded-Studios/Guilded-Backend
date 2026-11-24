@@ -341,7 +341,6 @@ featuresRouter.get("/uploads/:attachmentId/url", async (req, res, next) => {
     const storageUrl = url.endsWith("/") ? url.slice(0, -1) : url;
     const path = attachment.storageKey.split("/").map(encodeURIComponent).join("/");
     const signed = await fetch(storageUrl + "/storage/v1/object/sign/" + encodeURIComponent(bucket) + "/" + path, { method: "POST", headers: { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify({ expiresIn: 3600 }) });
-    const signed = await fetch(url.replace(/\\/$/, "") + "/storage/v1/object/sign/" + encodeURIComponent(bucket) + "/" + path, { method: "POST", headers: { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify({ expiresIn: 3600 }) });
     if (!signed.ok) return res.status(502).json({ error: { message: "Could not create a download link." } });
     const payload = await signed.json() as { signedURL?: string; signedUrl?: string };
     const signedPath = payload.signedURL || payload.signedUrl;

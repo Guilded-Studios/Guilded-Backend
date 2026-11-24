@@ -131,7 +131,7 @@ featuresRouter.post("/friends/requests", async (req, res, next) => {
     if (!body.success) return res.status(400).json({ error: { message: "Enter a valid username" } });
     const identity = /^([a-z0-9_]{3,32})#([0-9]{4})$/i.exec(body.data.username);
     if (!identity) return res.status(400).json({ error: { message: "Enter the full username, including its four-digit #tag (example: player#4821)." } });
-    const target = await prisma.user.findUnique({ where: { username_tag: { username: identity[1].toLowerCase(), tag: identity[2] } }, select: { id: true } });
+    const target = await prisma.user.findUnique({ where: { username_tag: { username: identity[1]!.toLowerCase(), tag: identity[2]! } }, select: { id: true } });
     if (!target || target.id === req.auth!.userId) return res.status(404).json({ error: { message: "User not found" } });
     const existing = await prisma.friendRequest.findFirst({ where: { OR: [{ senderId: req.auth!.userId, receiverId: target.id }, { senderId: target.id, receiverId: req.auth!.userId }] } });
     if (existing?.status === "ACCEPTED") return res.status(409).json({ error: { message: "You are already friends" } });

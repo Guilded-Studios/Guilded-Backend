@@ -24,6 +24,37 @@ usersRouter.get("/me", async (request, response, next) => {
   } catch (error) { next(error); }
 });
 
+usersRouter.get("/me/sessions", async (request, response, next) => {
+  try {
+    const sessions = await prisma.session.findMany({
+      where: { userId: request.auth!.userId, expiresAt: { gt: new Date() } },
+      select: { id: true, createdAt: true, expiresAt: true },
+      orderBy: { createdAt: "desc" }
+    });
+    response.json({ sessions: sessions.map(session => ({ ...session, current: session.id === request.auth!.sessionId })) });
+  } catch (error) { next(error); }
+});
+
+usersRouter.delete("/me/sessions/others", async (request, response, next) => {
+  try {
+    const result = await prisma.session.deleteMany({
+      where: { userId: request.auth!.userId, id: { not: request.auth!.sessionId } }
+    });
+    response.json({ revoked: result.count });
+  } catch (error) { next(error); }
+});
+
+usersRouter.delete("/me/sessions/:sessionId", async (request, response, next) => {
+  try {
+    const sessionId = z.string().min(1).max(128).safeParse(request.params.sessionId);
+    if (!sessionId.success) return response.status(400).json({ error: { message: "Invalid session." } });
+    if (sessionId.data === request.auth!.sessionId) return response.status(400).json({ error: { message: "Use Log out to end your current session." } });
+    const result = await prisma.session.deleteMany({ where: { id: sessionId.data, userId: request.auth!.userId } });
+    if (!result.count) return response.status(404).json({ error: { message: "Session not found." } });
+    response.status(204).end();
+  } catch (error) { next(error); }
+});
+
 usersRouter.post("/me/media/sign", async (request, response, next) => {
   try {
     const parsed = z.object({

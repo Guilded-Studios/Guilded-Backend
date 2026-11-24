@@ -62,7 +62,8 @@ usersRouter.patch("/me", async (request, response, next) => {
         }
       }
     }
-    const { username: _requestedUsername, ...profileData } = parsed.data;
+    const profileData = { ...parsed.data };
+    delete profileData.username;
     const user = await prisma.user.update({
       where: { id: request.auth!.userId },
       data: { ...profileData, ...(username ? { username, tag } : {}) },

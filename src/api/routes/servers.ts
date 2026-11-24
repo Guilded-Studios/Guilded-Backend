@@ -127,7 +127,7 @@ serversRouter.get("/:serverId", async (request, response, next) => {
     const server = await prisma.server.findUnique({
       where: { id: params.data.serverId },
       select: {
-        id: true, name: true, description: true, ownerId: true, inviteCode: true, createdAt: true,
+        id: true, name: true, description: true, iconUrl: true, bannerUrl: true, ownerId: true, inviteCode: true, createdAt: true,
         channels: { orderBy: { position: "asc" }, select: { id: true, name: true, type: true, position: true, categoryId: true } },
         _count: { select: { members: true } }
       }
@@ -141,7 +141,9 @@ serversRouter.patch("/:serverId", async (request, response, next) => {
     const params = serverParams.safeParse(request.params);
     const parsed = z.object({
       name: z.string().trim().min(2).max(64).optional(),
-      description: z.string().trim().max(500).nullable().optional()
+      description: z.string().trim().max(500).nullable().optional(),
+      iconUrl: z.string().trim().url().max(2048).nullable().optional(),
+      bannerUrl: z.string().trim().url().max(2048).nullable().optional()
     }).strict().safeParse(request.body);
     if (!params.success || !parsed.success || Object.keys(parsed.data ?? {}).length === 0) {
       response.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Provide a valid server update" } });

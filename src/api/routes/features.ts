@@ -118,18 +118,20 @@ featuresRouter.get("/friends", async (req, res, next) => {
   try {
     const userId = req.auth!.userId;
     const [incoming, outgoing, accepted] = await Promise.all([
-      prisma.friendRequest.findMany({ where: { receiverId: userId, status: "PENDING" }, include: { sender: { select: { id: true, username: true, displayName: true } } } }),
-      prisma.friendRequest.findMany({ where: { senderId: userId, status: "PENDING" }, include: { receiver: { select: { id: true, username: true, displayName: true } } } }),
-      prisma.friendRequest.findMany({ where: { OR: [{ senderId: userId }, { receiverId: userId }], status: "ACCEPTED" }, include: { sender: { select: { id: true, username: true, displayName: true } }, receiver: { select: { id: true, username: true, displayName: true } } } })
+      prisma.friendRequest.findMany({ where: { receiverId: userId, status: "PENDING" }, include: { sender: { select: { id: true, username: true, tag: true, displayName: true } } } }),
+      prisma.friendRequest.findMany({ where: { senderId: userId, status: "PENDING" }, include: { receiver: { select: { id: true, username: true, tag: true, displayName: true } } } }),
+      prisma.friendRequest.findMany({ where: { OR: [{ senderId: userId }, { receiverId: userId }], status: "ACCEPTED" }, include: { sender: { select: { id: true, username: true, tag: true, displayName: true } }, receiver: { select: { id: true, username: true, tag: true, displayName: true } } } })
     ]);
     res.json({ incoming, outgoing, friends: accepted.map(f => f.senderId === userId ? f.receiver : f.sender) });
   } catch (e) { next(e); }
 });
 featuresRouter.post("/friends/requests", async (req, res, next) => {
   try {
-    const body = z.object({ username: z.string().trim().min(3).max(32) }).strict().safeParse(req.body);
+    const body = z.object({ username: z.string().trim().min(3).max(37) }).strict().safeParse(req.body);
     if (!body.success) return res.status(400).json({ error: { message: "Enter a valid username" } });
-    const target = await prisma.user.findUnique({ where: { username: body.data.username }, select: { id: true } });
+    const identity = /^([a-z0-9_]{3,32})#([0-9]{4})$/i.exec(body.data.username);
+    if (!identity) return res.status(400).json({ error: { message: "Enter the full username, including its four-digit #tag (example: player#4821)." } });
+    const target = await prisma.user.findUnique({ where: { username_tag: { username: identity[1].toLowerCase(), tag: identity[2] } }, select: { id: true } });
     if (!target || target.id === req.auth!.userId) return res.status(404).json({ error: { message: "User not found" } });
     const existing = await prisma.friendRequest.findFirst({ where: { OR: [{ senderId: req.auth!.userId, receiverId: target.id }, { senderId: target.id, receiverId: req.auth!.userId }] } });
     if (existing?.status === "ACCEPTED") return res.status(409).json({ error: { message: "You are already friends" } });
@@ -156,8 +158,8 @@ featuresRouter.get("/conversations", async (req, res, next) => {
       where: { members: { some: { userId: req.auth!.userId } } },
       orderBy: { updatedAt: "desc" },
       include: {
-        members: { include: { user: { select: { id: true, username: true, displayName: true } } } },
-        messages: { take: 1, orderBy: { createdAt: "desc" }, include: { author: { select: { id: true, username: true, displayName: true } } } }
+        members: { include: { user: { select: { id: true, username: true, tag: true, displayName: true } } } },
+        messages: { take: 1, orderBy: { createdAt: "desc" }, include: { author: { select: { id: true, username: true, tag: true, displayName: true } } } }
       }
     });
     res.json({ conversations });
@@ -169,8 +171,8 @@ featuresRouter.post("/conversations", async (req, res, next) => {
     if (!body.success || body.data.userId === req.auth!.userId) return res.status(400).json({ error: { message: "Choose another user" } });
     const target = await prisma.user.findUnique({ where: { id: body.data.userId }, select: { id: true } });
     if (!target) return res.status(404).json({ error: { message: "User not found" } });
-    const existing = await prisma.conversation.findFirst({ where: { AND: [{ members: { some: { userId: req.auth!.userId } } }, { members: { some: { userId: target.id } } }, { members: { every: { userId: { in: [req.auth!.userId, target.id] } } } }] }, include: { members: { include: { user: { select: { id: true, username: true, displayName: true } } } } } });
-    const conversation = existing ?? await prisma.conversation.create({ data: { members: { create: [{ userId: req.auth!.userId }, { userId: target.id }] } }, include: { members: { include: { user: { select: { id: true, username: true, displayName: true } } } } } });
+    const existing = await prisma.conversation.findFirst({ where: { AND: [{ members: { some: { userId: req.auth!.userId } } }, { members: { some: { userId: target.id } } }, { members: { every: { userId: { in: [req.auth!.userId, target.id] } } } }] }, include: { members: { include: { user: { select: { id: true, username: true, tag: true, displayName: true } } } } } });
+    const conversation = existing ?? await prisma.conversation.create({ data: { members: { create: [{ userId: req.auth!.userId }, { userId: target.id }] } }, include: { members: { include: { user: { select: { id: true, username: true, tag: true, displayName: true } } } } } });
     res.status(existing ? 200 : 201).json({ conversation });
   } catch (e) { next(e); }
 });
@@ -178,7 +180,7 @@ featuresRouter.get("/conversations/:conversationId/messages", async (req, res, n
   try {
     const member = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: req.params.conversationId, userId: req.auth!.userId } } });
     if (!member) return res.status(404).json({ error: { message: "Conversation not found" } });
-    const messages = await prisma.directMessage.findMany({ where: { conversationId: req.params.conversationId }, orderBy: { createdAt: "asc" }, take: 100, include: { author: { select: { id: true, username: true, displayName: true } }, attachments: true } });
+    const messages = await prisma.directMessage.findMany({ where: { conversationId: req.params.conversationId }, orderBy: { createdAt: "asc" }, take: 100, include: { author: { select: { id: true, username: true, tag: true, displayName: true } }, attachments: true } });
     res.json({ messages });
   } catch (e) { next(e); }
 });
@@ -188,7 +190,7 @@ featuresRouter.post("/conversations/:conversationId/messages", async (req, res, 
     if (!body.success) return res.status(400).json({ error: { message: "Message must be 1–4000 characters" } });
     const member = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: req.params.conversationId, userId: req.auth!.userId } } });
     if (!member) return res.status(404).json({ error: { message: "Conversation not found" } });
-    const message = await prisma.directMessage.create({ data: { conversationId: req.params.conversationId, authorId: req.auth!.userId, content: body.data.content }, include: { author: { select: { id: true, username: true, displayName: true } } } });
+    const message = await prisma.directMessage.create({ data: { conversationId: req.params.conversationId, authorId: req.auth!.userId, content: body.data.content }, include: { author: { select: { id: true, username: true, tag: true, displayName: true } } } });
     await prisma.conversation.update({ where: { id: req.params.conversationId }, data: { updatedAt: new Date() } });
     res.status(201).json({ message });
   } catch (e) { next(e); }
@@ -224,7 +226,7 @@ featuresRouter.post("/servers/:serverId/applications", async (req, res, next) =>
 featuresRouter.get("/servers/:serverId/applications", async (req, res, next) => {
   try {
     if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_APPLICATIONS")) return res.status(403).json({ error: { message: "You cannot review applications" } });
-    const applications = await prisma.serverApplication.findMany({ where: { serverId: req.params.serverId }, include: { user: { select: { id: true, username: true, displayName: true } } }, orderBy: { createdAt: "desc" } });
+    const applications = await prisma.serverApplication.findMany({ where: { serverId: req.params.serverId }, include: { user: { select: { id: true, username: true, tag: true, displayName: true } } }, orderBy: { createdAt: "desc" } });
     res.json({ applications });
   } catch (e) { next(e); }
 });
@@ -255,11 +257,11 @@ featuresRouter.get("/servers/:serverId/audit-log", async (req, res, next) => {
 featuresRouter.post("/servers/:serverId/moderation", async (req, res, next) => {
   try {
     if (!await can(req.params.serverId, req.auth!.userId, "MODERATE_MEMBERS")) return res.status(403).json({ error: { message: "You cannot moderate members" } });
-    const body = z.object({ userId: id.optional(), username: z.string().trim().min(3).max(32).optional(), action: z.enum(["WARN", "KICK", "BAN", "UNBAN", "TIMEOUT"]), reason: z.string().max(500).optional(), expiresAt: z.string().datetime().optional() }).strict().refine(v => Boolean(v.userId || v.username)).safeParse(req.body);
+    const body = z.object({ userId: id.optional(), username: z.string().trim().min(8).max(37).optional(), action: z.enum(["WARN", "KICK", "BAN", "UNBAN", "TIMEOUT"]), reason: z.string().max(500).optional(), expiresAt: z.string().datetime().optional() }).strict().refine(v => Boolean(v.userId || v.username)).safeParse(req.body);
     if (!body.success) return res.status(400).json({ error: { message: "Invalid moderation action" } });
     const targetUser = body.data.userId
       ? await prisma.user.findUnique({ where: { id: body.data.userId }, select: { id: true } })
-      : await prisma.user.findUnique({ where: { username: body.data.username! }, select: { id: true } });
+      : await (async () => { const identity = /^([a-z0-9_]{3,32})#([0-9]{4})$/i.exec(body.data.username!); return identity ? prisma.user.findUnique({ where: { username_tag: { username: identity[1].toLowerCase(), tag: identity[2] } }, select: { id: true } }) : null; })();
     if (!targetUser || targetUser.id === req.auth!.userId) return res.status(404).json({ error: { message: "Target user not found" } });
     const target = await memberOf(req.params.serverId, targetUser.id);
     if (target?.role === "OWNER") return res.status(403).json({ error: { message: "The server owner cannot be moderated" } });

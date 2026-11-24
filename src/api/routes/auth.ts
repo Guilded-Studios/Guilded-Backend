@@ -204,7 +204,7 @@ authRouter.get("/me", requireAuth, async (request, response, next) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: request.auth!.userId },
-      select: { id: true, username: true, tag: true, displayName: true, email: true, createdAt: true }
+      select: { id: true, username: true, tag: true, displayName: true, email: true, bio: true, pronouns: true, customStatus: true, avatarUrl: true, bannerUrl: true, profileVisibility: true, createdAt: true }
     });
     if (!user) {
       response.status(401).json({ error: { code: "UNAUTHENTICATED", message: "Account no longer exists" } });

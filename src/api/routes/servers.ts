@@ -109,7 +109,8 @@ serversRouter.get("/:serverId/members", async (request, response, next) => {
         role: true,
         roleId: true,
         joinedAt: true,
-        user: { select: { id: true, username: true, tag: true, displayName: true } }
+        customRole: { select: { id: true, name: true, color: true } },
+        user: { select: { id: true, username: true, tag: true, displayName: true, bio: true, pronouns: true, customStatus: true, avatarUrl: true, bannerUrl: true } }
       }
     });
     response.json({ members });

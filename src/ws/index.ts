@@ -27,7 +27,22 @@ export function attachRealtime(httpServer: HttpServer) {
     } catch { next(new Error("Unable to authenticate connection")); }
   });
   setRealtimeServer(io);
-  io.on("connection", (socket) => {
+  const activeUsers = new Map<string, { id: string; username: string; tag: string; displayName: string | null; sockets: Set<string> }>();
+  io.on("connection", async (socket) => {
+    const profile = await prisma.user.findUnique({
+      where: { id: socket.data.userId },
+      select: { id: true, username: true, tag: true, displayName: true }
+    });
+    if (!profile || !socket.connected) return;
+    let active = activeUsers.get(profile.id);
+    const wasOffline = !active;
+    if (!active) {
+      active = { ...profile, sockets: new Set<string>() };
+      activeUsers.set(profile.id, active);
+    }
+    active.sockets.add(socket.id);
+    socket.emit("presence:snapshot", Array.from(activeUsers.values()).map(({ sockets, ...person }) => person));
+    if (wasOffline) io.emit("presence:update", { ...profile, status: "ONLINE" });
     socket.emit("system:ready", { connected: true, userId: socket.data.userId });
     socket.on("channel:join", async (channelId: unknown, callback?: (result: { ok: boolean }) => void) => {
       if (typeof channelId !== "string" || channelId.length > 128) {
@@ -64,6 +79,15 @@ export function attachRealtime(httpServer: HttpServer) {
     });
     socket.on("system:ping", (callback?: (payload: { timestamp: string }) => void) => {
       if (typeof callback === "function") callback({ timestamp: new Date().toISOString() });
+    });
+    socket.on("disconnect", () => {
+      const current = activeUsers.get(profile.id);
+      if (!current) return;
+      current.sockets.delete(socket.id);
+      if (current.sockets.size === 0) {
+        activeUsers.delete(profile.id);
+        io.emit("presence:update", { id: profile.id, status: "OFFLINE" });
+      }
     });
   });
   return io;

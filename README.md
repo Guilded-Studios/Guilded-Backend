@@ -2,7 +2,7 @@
 
 The self-hostable backend for Guilded, a community communication platform. Each operator runs their own instance and connects it to a PostgreSQL database they control. Supabase is supported but not required.
 
-> **Project status:** Active development. This release includes account authentication, server membership, channels, text messaging, and authenticated realtime channel subscriptions. Direct messages, roles/permission customization, attachments, moderation tools, and additional platform services remain in development.
+> **Project status:** Active development. The backend currently includes account authentication, server membership, channels, text messaging, realtime channel subscriptions, configurable roles and channel permissions, friends and direct messages, events and join applications, moderation records and audit logs, message reactions, and signed file uploads/downloads. These features still require deployment-level configuration and broader integration testing.
 
 ## Stack
 
@@ -90,6 +90,10 @@ The API listens on http://localhost:4000 by default.
 | CLIENT_ORIGINS | Comma-separated exact frontend origins |
 | SESSION_TTL_DAYS | Session lifetime, 1–90 days; default 30 |
 | DATABASE_URL | Connection string for your PostgreSQL database |
+| SUPABASE_URL | Supabase project URL used by Supabase Auth and Storage |
+| SUPABASE_ANON_KEY | Supabase publishable/anon key used by the backend Auth requests |
+| SUPABASE_SERVICE_ROLE_KEY | Optional server-only key required for signed file uploads and downloads; never expose it to the frontend |
+| GUILDED_STORAGE_BUCKET | Optional Supabase Storage bucket name; defaults to `guilded-uploads` |
 
 Never commit .env, database passwords, API keys, signing secrets, or production credentials.
 
@@ -97,7 +101,7 @@ Never commit .env, database passwords, API keys, signing secrets, or production 
 
 The Prisma schema and migrations describe the public database structure required by self-hosted instances. They are not Guilded Studios' production database, production records, credentials, or private operational tooling.
 
-Each operator uses their own database. The backend connects to PostgreSQL server-side through DATABASE_URL. Do not expose database credentials or privileged Supabase keys to browser clients. RLS is enabled on the mirrored Supabase tables, with no public policies.
+Each operator uses their own database. The backend connects to PostgreSQL server-side through DATABASE_URL. Do not expose database credentials or privileged Supabase keys to browser clients. Do not assume database row-level security is enabled automatically; the API enforces authorization in application code, and operators should configure database access policies appropriate to their deployment.
 
 ## Development principles
 

@@ -84,6 +84,22 @@ export function attachRealtime(httpServer: HttpServer) {
     socket.on("channel:leave", (channelId: unknown) => {
       if (typeof channelId === "string" && channelId.length <= 128) void socket.leave("channel:" + channelId);
     });
+    socket.on("conversation:join", async (conversationId: unknown, callback?: (result: { ok: boolean }) => void) => {
+      if (typeof conversationId !== "string" || conversationId.length > 128) { callback?.({ ok: false }); return; }
+      try {
+        const member = await prisma.conversationMember.findUnique({
+          where: { conversationId_userId: { conversationId, userId: socket.data.userId } },
+          select: { id: true }
+        });
+        if (!member) { callback?.({ ok: false }); return; }
+        await socket.join("conversation:" + conversationId);
+        callback?.({ ok: true });
+      } catch { callback?.({ ok: false }); }
+    });
+    socket.on("conversation:leave", (conversationId: unknown) => {
+      if (typeof conversationId === "string" && conversationId.length <= 128) void socket.leave("conversation:" + conversationId);
+    });
+
     socket.on("system:ping", (callback?: (payload: { timestamp: string }) => void) => {
       if (typeof callback === "function") callback({ timestamp: new Date().toISOString() });
     });

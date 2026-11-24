@@ -81,6 +81,16 @@ serversRouter.post("/join", async (request, response, next) => {
   } catch (error) { next(error); }
 });
 
+serversRouter.get("/invites/:inviteCode", async (request, response, next) => {
+  try {
+    const inviteCode = z.string().trim().min(6).max(64).safeParse(request.params.inviteCode);
+    if (!inviteCode.success) return response.status(404).json({ error: { code: "INVITE_NOT_FOUND", message: "Invite not found" } });
+    const server = await prisma.server.findUnique({ where: { inviteCode: inviteCode.data }, select: { id: true, name: true, description: true, _count: { select: { members: true } } } });
+    if (!server) return response.status(404).json({ error: { code: "INVITE_NOT_FOUND", message: "Invite not found" } });
+    response.json({ server });
+  } catch (error) { next(error); }
+});
+
 serversRouter.get("/:serverId/members", async (request, response, next) => {
   try {
     const params = serverParams.safeParse(request.params);

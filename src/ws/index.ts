@@ -39,9 +39,22 @@ export function attachRealtime(httpServer: HttpServer) {
         if (!channel) { callback?.({ ok: false }); return; }
         const member = await prisma.serverMember.findUnique({
           where: { serverId_userId: { serverId: channel.serverId, userId: socket.data.userId } },
-          select: { id: true }
+          include: { customRole: true }
         });
         if (!member) { callback?.({ ok: false }); return; }
+        if (member.role !== "OWNER" && member.role !== "ADMIN") {
+          const permissions = member.customRole?.permissions as Record<string, boolean> | undefined;
+          if (permissions?.READ_MESSAGES === false) { callback?.({ ok: false }); return; }
+          if (permissions?.READ_MESSAGES !== true) {
+            const overrides = await prisma.channelPermissionOverride.findMany({
+              where: { channelId, OR: [{ memberId: member.id }, ...(member.roleId ? [{ roleId: member.roleId }] : [])] }
+            });
+            if (overrides.some(override => (override.deny as Record<string, boolean>).READ_MESSAGES === true)) {
+              callback?.({ ok: false });
+              return;
+            }
+          }
+        }
         await socket.join("channel:" + channelId);
         callback?.({ ok: true });
       } catch { callback?.({ ok: false }); }

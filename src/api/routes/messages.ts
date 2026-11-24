@@ -47,7 +47,7 @@ messagesRouter.get("/:channelId/messages", async (request, response, next) => {
       take: query.data.limit,
       ...(query.data.before ? { cursor: { id: query.data.before }, skip: 1 } : {}),
       orderBy: { createdAt: "desc" },
-      include: { author: { select: { id: true, username: true, displayName: true } }, attachments: true, reactions: { select: { emoji: true, userId: true } } }
+      include: { author: { select: { id: true, username: true, tag: true, displayName: true } }, attachments: true, reactions: { select: { emoji: true, userId: true } } }
     });
     response.json({ messages: messages.reverse(), hasMore: messages.length === query.data.limit });
   } catch (error) { next(error); }
@@ -68,7 +68,7 @@ messagesRouter.post("/:channelId/messages", async (request, response, next) => {
     }
     const message = await prisma.message.create({
       data: { channelId: channel.id, authorId: request.auth!.userId, content: parsed.data.content },
-      include: { author: { select: { id: true, username: true, displayName: true } } }
+      include: { author: { select: { id: true, username: true, tag: true, displayName: true } } }
     });
     getRealtimeServer()?.to("channel:" + channel.id).emit("message:new", message);
     response.status(201).json({ message });
@@ -105,7 +105,7 @@ messagesRouter.patch("/:channelId/messages/:messageId", async (request, response
     const updated = await prisma.message.update({
       where: { id: message.id },
       data: { content: parsed.data.content, editedAt: new Date() },
-      include: { author: { select: { id: true, username: true, displayName: true } } }
+      include: { author: { select: { id: true, username: true, tag: true, displayName: true } } }
     });
     getRealtimeServer()?.to("channel:" + message.channelId).emit("message:update", updated);
     response.json({ message: updated });

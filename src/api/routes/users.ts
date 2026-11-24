@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { Router, type Router as ExpressRouter } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
@@ -26,6 +27,7 @@ usersRouter.get("/me", async (request, response, next) => {
 usersRouter.patch("/me", async (request, response, next) => {
   try {
     const parsed = z.object({
+      username: z.string().trim().min(3).max(32).regex(/^[a-zA-Z0-9_]+$/).optional(),
       displayName: z.string().trim().min(1).max(64).nullable().optional(),
       bio: z.string().trim().max(190).nullable().optional(),
       pronouns: z.string().trim().max(40).nullable().optional(),
@@ -38,9 +40,32 @@ usersRouter.patch("/me", async (request, response, next) => {
       response.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Provide valid profile settings", details: parsed.success ? undefined : parsed.error.flatten().fieldErrors } });
       return;
     }
+    const current = await prisma.user.findUnique({ where: { id: request.auth!.userId }, select: { username: true, tag: true } });
+    if (!current) {
+      response.status(404).json({ error: { code: "USER_NOT_FOUND", message: "Account not found" } });
+      return;
+    }
+    const username = parsed.data.username?.toLowerCase();
+    let tag = current.tag;
+    if (username && username !== current.username) {
+      const collision = await prisma.user.findUnique({ where: { username_tag: { username, tag } }, select: { id: true } });
+      if (collision) {
+        let allocated = false;
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const candidate = String(randomInt(1000, 10000));
+          const exists = await prisma.user.findUnique({ where: { username_tag: { username, tag: candidate } }, select: { id: true } });
+          if (!exists) { tag = candidate; allocated = true; break; }
+        }
+        if (!allocated) {
+          response.status(503).json({ error: { code: "TAG_ALLOCATION_FAILED", message: "Could not assign a new username tag. Please try again." } });
+          return;
+        }
+      }
+    }
+    const { username: _requestedUsername, ...profileData } = parsed.data;
     const user = await prisma.user.update({
       where: { id: request.auth!.userId },
-      data: parsed.data,
+      data: { ...profileData, ...(username ? { username, tag } : {}) },
       select: profileSelect
     });
     response.json({ user: { ...user, createdAt: user.createdAt.toISOString() } });

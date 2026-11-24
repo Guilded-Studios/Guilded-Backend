@@ -37,6 +37,12 @@ model User {
   username     String
   tag          String
   displayName  String?
+  bio          String?        @db.VarChar(190)
+  pronouns     String?        @db.VarChar(40)
+  customStatus String?        @db.VarChar(80)
+  avatarUrl    String?        @db.VarChar(2048)
+  bannerUrl    String?        @db.VarChar(2048)
+  profileVisibility String   @default("EVERYONE")
   email        String         @unique
   passwordHash String?
   supabaseId   String?        @unique
@@ -73,6 +79,8 @@ model Server {
   id          String         @id @default(cuid())
   name        String
   description String?
+  iconUrl     String?        @db.VarChar(2048)
+  bannerUrl   String?        @db.VarChar(2048)
   inviteCode  String         @unique
   ownerId     String
   createdAt   DateTime       @default(now())

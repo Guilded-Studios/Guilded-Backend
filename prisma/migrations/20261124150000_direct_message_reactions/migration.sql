@@ -1,0 +1,27 @@
+CREATE TABLE "DirectMessageReaction" (
+    "id" TEXT NOT NULL,
+    "directMessageId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "emoji" VARCHAR(32) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "DirectMessageReaction_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX "DirectMessageReaction_directMessageId_userId_emoji_key"
+ON "DirectMessageReaction"("directMessageId", "userId", "emoji");
+
+CREATE INDEX "DirectMessageReaction_directMessageId_idx"
+ON "DirectMessageReaction"("directMessageId");
+
+CREATE INDEX "DirectMessageReaction_userId_idx"
+ON "DirectMessageReaction"("userId");
+
+ALTER TABLE "DirectMessageReaction"
+ADD CONSTRAINT "DirectMessageReaction_directMessageId_fkey"
+FOREIGN KEY ("directMessageId") REFERENCES "DirectMessage"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE "DirectMessageReaction"
+ADD CONSTRAINT "DirectMessageReaction_userId_fkey"
+FOREIGN KEY ("userId") REFERENCES "User"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;

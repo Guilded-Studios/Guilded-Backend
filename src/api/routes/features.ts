@@ -98,11 +98,16 @@ featuresRouter.patch("/servers/:serverId/channels/:channelId/category", async (r
 featuresRouter.put("/servers/:serverId/channels/:channelId/permissions", async (req, res, next) => {
   try {
     if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_CHANNELS")) return res.status(403).json({ error: { message: "You cannot manage channel permissions" } });
-    const body = z.object({ roleId: id.nullable().optional(), memberId: id.nullable().optional(), allow: z.record(z.boolean()), deny: z.record(z.boolean()) }).strict().refine(v => Boolean(v.roleId || v.memberId)).safeParse(req.body);
-    if (!body.success) return res.status(400).json({ error: { message: "Choose a role or member and provide permission rules" } });
+    const body = z.object({ roleId: id.nullable().optional(), memberId: id.nullable().optional(), allow: z.record(z.boolean()), deny: z.record(z.boolean()) }).strict().refine(v => Boolean(v.roleId) !== Boolean(v.memberId)).safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Choose exactly one role or member and provide permission rules" } });
     const channel = await prisma.channel.findFirst({ where: { id: req.params.channelId, serverId: req.params.serverId } });
     if (!channel) return res.status(404).json({ error: { message: "Channel not found" } });
-    const override = await prisma.channelPermissionOverride.create({ data: { channelId: channel.id, roleId: body.data.roleId, memberId: body.data.memberId, allow: body.data.allow, deny: body.data.deny } });
+    if (body.data.roleId && !await prisma.serverRole.findFirst({ where: { id: body.data.roleId, serverId: req.params.serverId } })) return res.status(404).json({ error: { message: "Role not found" } });
+    if (body.data.memberId && !await prisma.serverMember.findFirst({ where: { id: body.data.memberId, serverId: req.params.serverId } })) return res.status(404).json({ error: { message: "Member not found" } });
+    const existing = await prisma.channelPermissionOverride.findFirst({ where: { channelId: channel.id, roleId: body.data.roleId ?? null, memberId: body.data.memberId ?? null } });
+    const override = existing
+      ? await prisma.channelPermissionOverride.update({ where: { id: existing.id }, data: { allow: body.data.allow, deny: body.data.deny } })
+      : await prisma.channelPermissionOverride.create({ data: { channelId: channel.id, roleId: body.data.roleId, memberId: body.data.memberId, allow: body.data.allow, deny: body.data.deny } });
     await audit(req.params.serverId, req.auth!.userId, "CHANNEL_PERMISSIONS_UPDATED", channel.id);
     res.status(201).json({ override });
   } catch (e) { next(e); }
@@ -323,6 +328,7 @@ featuresRouter.get("/uploads/:attachmentId/url", async (req, res, next) => {
     if (!attachment) return res.status(404).json({ error: { message: "Attachment not found" } });
     if (attachment.channel && !await memberOf(attachment.channel.serverId, req.auth!.userId)) return res.status(404).json({ error: { message: "Attachment not found" } });
     if (attachment.directMessage && !await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: attachment.directMessage.conversationId, userId: req.auth!.userId } } })) return res.status(404).json({ error: { message: "Attachment not found" } });
+    if (!attachment.channel && !attachment.directMessage && attachment.uploaderId !== req.auth!.userId) return res.status(404).json({ error: { message: "Attachment not found" } });
     const url = process.env.SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const bucket = process.env.GUILDED_STORAGE_BUCKET || "guilded-uploads";

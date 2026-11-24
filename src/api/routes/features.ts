@@ -233,6 +233,7 @@ featuresRouter.post("/conversations/:conversationId/messages", async (req, res, 
     if (!member) return res.status(404).json({ error: { message: "Conversation not found" } });
     const message = await prisma.directMessage.create({ data: { conversationId: req.params.conversationId, authorId: req.auth!.userId, content: body.data.content }, include: { author: { select: { id: true, username: true, tag: true, displayName: true } } } });
     await prisma.conversation.update({ where: { id: req.params.conversationId }, data: { updatedAt: new Date() } });
+    getRealtimeServer()?.to("conversation:" + req.params.conversationId).emit("direct-message:new", { conversationId: req.params.conversationId, message });
     res.status(201).json({ message });
   } catch (e) { next(e); }
 });

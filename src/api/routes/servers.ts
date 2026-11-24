@@ -137,6 +137,39 @@ serversRouter.get("/:serverId", async (request, response, next) => {
   } catch (error) { next(error); }
 });
 
+serversRouter.post("/:serverId/invite-code", async (request, response, next) => {
+  try {
+    const params = serverParams.safeParse(request.params);
+    if (!params.success) {
+      response.status(400).json({ error: { code: "INVALID_SERVER_ID", message: "Invalid server ID" } });
+      return;
+    }
+    const member = await membership(params.data.serverId, request.auth!.userId);
+    if (!member || !canManage(member.role)) {
+      response.status(403).json({ error: { code: "FORBIDDEN", message: "Only server owners and admins can reset the invite code" } });
+      return;
+    }
+    const inviteCode = randomBytes(9).toString("base64url");
+    const server = await prisma.$transaction(async (tx) => {
+      const updated = await tx.server.update({
+        where: { id: params.data.serverId },
+        data: { inviteCode },
+        select: { id: true, inviteCode: true }
+      });
+      await tx.auditLog.create({
+        data: {
+          serverId: params.data.serverId,
+          actorId: request.auth!.userId,
+          action: "INVITE_CODE_RESET",
+          targetId: params.data.serverId
+        }
+      });
+      return updated;
+    });
+    response.json({ server });
+  } catch (error) { next(error); }
+});
+
 serversRouter.patch("/:serverId", async (request, response, next) => {
   try {
     const params = serverParams.safeParse(request.params);

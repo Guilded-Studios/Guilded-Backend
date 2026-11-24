@@ -145,6 +145,19 @@ featuresRouter.patch("/friends/requests/:requestId", async (req, res, next) => {
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
+featuresRouter.get("/conversations", async (req, res, next) => {
+  try {
+    const conversations = await prisma.conversation.findMany({
+      where: { members: { some: { userId: req.auth!.userId } } },
+      orderBy: { updatedAt: "desc" },
+      include: {
+        members: { include: { user: { select: { id: true, username: true, displayName: true } } } },
+        messages: { take: 1, orderBy: { createdAt: "desc" }, include: { author: { select: { id: true, username: true, displayName: true } } } }
+      }
+    });
+    res.json({ conversations });
+  } catch (e) { next(e); }
+});
 featuresRouter.post("/conversations", async (req, res, next) => {
   try {
     const body = z.object({ userId: id }).strict().safeParse(req.body);
@@ -171,6 +184,7 @@ featuresRouter.post("/conversations/:conversationId/messages", async (req, res, 
     const member = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: req.params.conversationId, userId: req.auth!.userId } } });
     if (!member) return res.status(404).json({ error: { message: "Conversation not found" } });
     const message = await prisma.directMessage.create({ data: { conversationId: req.params.conversationId, authorId: req.auth!.userId, content: body.data.content }, include: { author: { select: { id: true, username: true, displayName: true } } } });
+    await prisma.conversation.update({ where: { id: req.params.conversationId }, data: { updatedAt: new Date() } });
     res.status(201).json({ message });
   } catch (e) { next(e); }
 });

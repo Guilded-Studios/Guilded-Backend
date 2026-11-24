@@ -338,12 +338,14 @@ featuresRouter.get("/uploads/:attachmentId/url", async (req, res, next) => {
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const bucket = process.env.GUILDED_STORAGE_BUCKET || "guilded-uploads";
     if (!url || !key) return res.status(503).json({ error: { message: "File storage is not configured." } });
+    const storageUrl = url.endsWith("/") ? url.slice(0, -1) : url;
     const path = attachment.storageKey.split("/").map(encodeURIComponent).join("/");
+    const signed = await fetch(storageUrl + "/storage/v1/object/sign/" + encodeURIComponent(bucket) + "/" + path, { method: "POST", headers: { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify({ expiresIn: 3600 }) });
     const signed = await fetch(url.replace(/\\/$/, "") + "/storage/v1/object/sign/" + encodeURIComponent(bucket) + "/" + path, { method: "POST", headers: { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify({ expiresIn: 3600 }) });
     if (!signed.ok) return res.status(502).json({ error: { message: "Could not create a download link." } });
     const payload = await signed.json() as { signedURL?: string; signedUrl?: string };
     const signedPath = payload.signedURL || payload.signedUrl;
     if (!signedPath) return res.status(502).json({ error: { message: "Storage returned an invalid download link." } });
-    res.json({ url: signedPath.startsWith("http") ? signedPath : url.replace(/\\/$/, "") + "/storage/v1" + signedPath, fileName: attachment.fileName });
+    res.json({ url: signedPath.startsWith("http") ? signedPath : storageUrl + "/storage/v1" + signedPath, fileName: attachment.fileName });
   } catch (e) { next(e); }
 });

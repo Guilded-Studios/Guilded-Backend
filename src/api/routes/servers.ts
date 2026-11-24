@@ -45,8 +45,7 @@ serversRouter.post("/", async (request, response, next) => {
         }
       });
       await tx.serverMember.create({ data: { serverId: created.id, userId: request.auth!.userId, role: "OWNER" } });
-      const channel = await tx.channel.create({ data: { serverId: created.id, name: "general", type: "TEXT", position: 0 } });
-      return { ...created, channels: [channel] };
+      return { ...created, channels: [] };
     });
     response.status(201).json({ server });
   } catch (error) { next(error); }

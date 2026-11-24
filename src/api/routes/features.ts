@@ -132,9 +132,9 @@ featuresRouter.get("/friends", async (req, res, next) => {
   try {
     const userId = req.auth!.userId;
     const [incoming, outgoing, accepted] = await Promise.all([
-      prisma.friendRequest.findMany({ where: { receiverId: userId, status: "PENDING" }, include: { sender: { select: { id: true, username: true, tag: true, displayName: true } } } }),
-      prisma.friendRequest.findMany({ where: { senderId: userId, status: "PENDING" }, include: { receiver: { select: { id: true, username: true, tag: true, displayName: true } } } }),
-      prisma.friendRequest.findMany({ where: { OR: [{ senderId: userId }, { receiverId: userId }], status: "ACCEPTED" }, include: { sender: { select: { id: true, username: true, tag: true, displayName: true } }, receiver: { select: { id: true, username: true, tag: true, displayName: true } } } })
+      prisma.friendRequest.findMany({ where: { receiverId: userId, status: "PENDING" }, include: { sender: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } } } }),
+      prisma.friendRequest.findMany({ where: { senderId: userId, status: "PENDING" }, include: { receiver: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } } } }),
+      prisma.friendRequest.findMany({ where: { OR: [{ senderId: userId }, { receiverId: userId }], status: "ACCEPTED" }, include: { sender: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } }, receiver: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } } } })
     ]);
     res.json({ incoming, outgoing, friends: accepted.map(f => f.senderId === userId ? f.receiver : f.sender) });
   } catch (e) { next(e); }
@@ -199,8 +199,8 @@ featuresRouter.get("/conversations", async (req, res, next) => {
       where: { members: { some: { userId: req.auth!.userId } } },
       orderBy: { updatedAt: "desc" },
       include: {
-        members: { include: { user: { select: { id: true, username: true, tag: true, displayName: true } } } },
-        messages: { take: 1, orderBy: { createdAt: "desc" }, include: { author: { select: { id: true, username: true, tag: true, displayName: true } } } }
+        members: { include: { user: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } } } },
+        messages: { take: 1, orderBy: { createdAt: "desc" }, include: { author: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } } } }
       }
     });
     res.json({ conversations });
@@ -222,7 +222,7 @@ featuresRouter.post("/conversations", async (req, res, next) => {
       if (userIds.some(friendId => !acceptedIds.has(friendId))) return res.status(403).json({ error: { message: "Group chats can only include your accepted friends." } });
       const conversation = await prisma.conversation.create({
         data: { members: { create: [req.auth!.userId, ...userIds].map(userId => ({ userId })) } },
-        include: { members: { include: { user: { select: { id: true, username: true, tag: true, displayName: true } } } } }
+        include: { members: { include: { user: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } } } } }
       });
       return res.status(201).json({ conversation });
     }
@@ -230,8 +230,8 @@ featuresRouter.post("/conversations", async (req, res, next) => {
     if (!body.success || body.data.userId === req.auth!.userId) return res.status(400).json({ error: { message: "Choose another user" } });
     const target = await prisma.user.findUnique({ where: { id: body.data.userId }, select: { id: true } });
     if (!target) return res.status(404).json({ error: { message: "User not found" } });
-    const existing = await prisma.conversation.findFirst({ where: { AND: [{ members: { some: { userId: req.auth!.userId } } }, { members: { some: { userId: target.id } } }, { members: { every: { userId: { in: [req.auth!.userId, target.id] } } } }] }, include: { members: { include: { user: { select: { id: true, username: true, tag: true, displayName: true } } } } } });
-    const conversation = existing ?? await prisma.conversation.create({ data: { members: { create: [{ userId: req.auth!.userId }, { userId: target.id }] } }, include: { members: { include: { user: { select: { id: true, username: true, tag: true, displayName: true } } } } } });
+    const existing = await prisma.conversation.findFirst({ where: { AND: [{ members: { some: { userId: req.auth!.userId } } }, { members: { some: { userId: target.id } } }, { members: { every: { userId: { in: [req.auth!.userId, target.id] } } } }] }, include: { members: { include: { user: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } } } } } });
+    const conversation = existing ?? await prisma.conversation.create({ data: { members: { create: [{ userId: req.auth!.userId }, { userId: target.id }] } }, include: { members: { include: { user: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } } } } } });
     res.status(existing ? 200 : 201).json({ conversation });
   } catch (e) { next(e); }
 });
@@ -239,7 +239,7 @@ featuresRouter.get("/conversations/:conversationId/messages", async (req, res, n
   try {
     const member = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: req.params.conversationId, userId: req.auth!.userId } } });
     if (!member) return res.status(404).json({ error: { message: "Conversation not found" } });
-    const messages = await prisma.directMessage.findMany({ where: { conversationId: req.params.conversationId }, orderBy: { createdAt: "asc" }, take: 100, include: { author: { select: { id: true, username: true, tag: true, displayName: true } }, attachments: true, reactions: { select: { emoji: true, userId: true } } } });
+    const messages = await prisma.directMessage.findMany({ where: { conversationId: req.params.conversationId }, orderBy: { createdAt: "asc" }, take: 100, include: { author: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } }, attachments: true, reactions: { select: { emoji: true, userId: true } } } });
     res.json({ messages });
   } catch (e) { next(e); }
 });
@@ -249,7 +249,7 @@ featuresRouter.post("/conversations/:conversationId/messages", async (req, res, 
     if (!body.success) return res.status(400).json({ error: { message: "Message must be 1–4000 characters" } });
     const member = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: req.params.conversationId, userId: req.auth!.userId } } });
     if (!member) return res.status(404).json({ error: { message: "Conversation not found" } });
-    const message = await prisma.directMessage.create({ data: { conversationId: req.params.conversationId, authorId: req.auth!.userId, content: body.data.content }, include: { author: { select: { id: true, username: true, tag: true, displayName: true } } } });
+    const message = await prisma.directMessage.create({ data: { conversationId: req.params.conversationId, authorId: req.auth!.userId, content: body.data.content }, include: { author: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } } } });
     await prisma.conversation.update({ where: { id: req.params.conversationId }, data: { updatedAt: new Date() } });
     getRealtimeServer()?.to("conversation:" + req.params.conversationId).emit("direct-message:new", { conversationId: req.params.conversationId, message });
     res.status(201).json({ message });
@@ -268,7 +268,7 @@ featuresRouter.patch("/conversations/:conversationId/messages/:messageId", async
     const message = await prisma.directMessage.update({
       where: { id: existing.id },
       data: { content: body.data.content, editedAt: new Date() },
-      include: { author: { select: { id: true, username: true, tag: true, displayName: true } }, attachments: true, reactions: { select: { emoji: true, userId: true } } }
+      include: { author: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } }, attachments: true, reactions: { select: { emoji: true, userId: true } } }
     });
     getRealtimeServer()?.to("conversation:" + req.params.conversationId).emit("direct-message:update", { conversationId: req.params.conversationId, message });
     res.json({ message });
@@ -301,7 +301,7 @@ featuresRouter.post("/conversations/:conversationId/messages/:messageId/reaction
     else await prisma.directMessageReaction.create({ data: { directMessageId: message.id, userId: req.auth!.userId, emoji: body.data.emoji } });
     const updated = await prisma.directMessage.findUnique({
       where: { id: message.id },
-      include: { author: { select: { id: true, username: true, tag: true, displayName: true } }, attachments: true, reactions: { select: { emoji: true, userId: true } } }
+      include: { author: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } }, attachments: true, reactions: { select: { emoji: true, userId: true } } }
     });
     if (updated) getRealtimeServer()?.to("conversation:" + req.params.conversationId).emit("direct-message:update", { conversationId: req.params.conversationId, message: updated });
     res.json({ reactions: updated?.reactions || [] });
@@ -338,7 +338,7 @@ featuresRouter.post("/servers/:serverId/applications", async (req, res, next) =>
 featuresRouter.get("/servers/:serverId/applications", async (req, res, next) => {
   try {
     if (!await can(req.params.serverId, req.auth!.userId, "MANAGE_APPLICATIONS")) return res.status(403).json({ error: { message: "You cannot review applications" } });
-    const applications = await prisma.serverApplication.findMany({ where: { serverId: req.params.serverId }, include: { user: { select: { id: true, username: true, tag: true, displayName: true } } }, orderBy: { createdAt: "desc" } });
+    const applications = await prisma.serverApplication.findMany({ where: { serverId: req.params.serverId }, include: { user: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } } }, orderBy: { createdAt: "desc" } });
     res.json({ applications });
   } catch (e) { next(e); }
 });
@@ -403,7 +403,7 @@ featuresRouter.post("/channels/:channelId/messages/:messageId/reactions", async 
       prisma.message.findUnique({
         where: { id: message.id },
         include: {
-          author: { select: { id: true, username: true, tag: true, displayName: true } },
+          author: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } },
           attachments: true,
           reactions: { select: { emoji: true, userId: true } }
         }

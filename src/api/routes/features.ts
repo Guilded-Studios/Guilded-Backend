@@ -267,7 +267,7 @@ featuresRouter.post("/servers/:serverId/moderation", async (req, res, next) => {
     if (body.data.action === "KICK" || body.data.action === "BAN") {
       if (target) await prisma.serverMember.delete({ where: { id: target.id } });
     }
-    const record = await prisma.moderationRecord.create({ data: { serverId: req.params.serverId, actorId: req.auth!.userId, targetUserId: targetUser.id, action: body.data.action, reason: body.data.reason, expiresAt: body.data.expiresAt ? new Date(body.data.expiresAt) : null } });
+    const record = await prisma.moderationRecord.create({ data: { serverId: req.params.serverId, actorId: req.auth!.userId, targetUserId: targetUser.id, action: body.data.action, reason: body.data.reason, expiresAt: body.data.expiresAt ? new Date(body.data.expiresAt) : body.data.action === "TIMEOUT" ? new Date(Date.now() + 10 * 60 * 1000) : null } });
     await audit(req.params.serverId, req.auth!.userId, "MODERATION_" + body.data.action, targetUser.id, { reason: body.data.reason });
     res.status(201).json({ record });
   } catch (e) { next(e); }

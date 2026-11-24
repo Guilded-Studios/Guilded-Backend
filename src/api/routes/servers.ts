@@ -17,7 +17,7 @@ serversRouter.get("/", async (request, response, next) => {
       where: { members: { some: { userId: request.auth!.userId } } },
       orderBy: { createdAt: "asc" },
       select: {
-        id: true, name: true, description: true, ownerId: true, createdAt: true,
+        id: true, name: true, description: true, iconUrl: true, bannerUrl: true, ownerId: true, createdAt: true,
         _count: { select: { members: true, channels: true } }
       }
     });

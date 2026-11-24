@@ -22,7 +22,7 @@ async function hasChannelPermission(channelId: string, serverId: string, userId:
     if (timeout && (!timeout.expiresAt || timeout.expiresAt > new Date())) return false;
   }
   const overrides = await prisma.channelPermissionOverride.findMany({
-    where: { channelId, OR: [{ memberId: userId }, ...(member.roleId ? [{ roleId: member.roleId }] : [])] }
+    where: { channelId, OR: [{ memberId: member.id }, ...(member.roleId ? [{ roleId: member.roleId }] : [])] }
   });
   if (overrides.some(override => (override.deny as Record<string, boolean>)[permission] === true)) return false;
   if (overrides.some(override => (override.allow as Record<string, boolean>)[permission] === true)) return true;

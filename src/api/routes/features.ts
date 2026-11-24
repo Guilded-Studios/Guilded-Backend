@@ -239,7 +239,7 @@ featuresRouter.get("/conversations/:conversationId/messages", async (req, res, n
   try {
     const member = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: req.params.conversationId, userId: req.auth!.userId } } });
     if (!member) return res.status(404).json({ error: { message: "Conversation not found" } });
-    const messages = await prisma.directMessage.findMany({ where: { conversationId: req.params.conversationId }, orderBy: { createdAt: "asc" }, take: 100, include: { author: { select: { id: true, username: true, tag: true, displayName: true } }, attachments: true } });
+    const messages = await prisma.directMessage.findMany({ where: { conversationId: req.params.conversationId }, orderBy: { createdAt: "asc" }, take: 100, include: { author: { select: { id: true, username: true, tag: true, displayName: true } }, attachments: true, reactions: { select: { emoji: true, userId: true } } } });
     res.json({ messages });
   } catch (e) { next(e); }
 });
@@ -253,6 +253,58 @@ featuresRouter.post("/conversations/:conversationId/messages", async (req, res, 
     await prisma.conversation.update({ where: { id: req.params.conversationId }, data: { updatedAt: new Date() } });
     getRealtimeServer()?.to("conversation:" + req.params.conversationId).emit("direct-message:new", { conversationId: req.params.conversationId, message });
     res.status(201).json({ message });
+  } catch (e) { next(e); }
+});
+
+featuresRouter.patch("/conversations/:conversationId/messages/:messageId", async (req, res, next) => {
+  try {
+    const body = z.object({ content: z.string().trim().min(1).max(4000) }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Message must be 1–4000 characters" } });
+    const member = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: req.params.conversationId, userId: req.auth!.userId } } });
+    if (!member) return res.status(404).json({ error: { message: "Conversation not found" } });
+    const existing = await prisma.directMessage.findFirst({ where: { id: req.params.messageId, conversationId: req.params.conversationId } });
+    if (!existing) return res.status(404).json({ error: { message: "Message not found" } });
+    if (existing.authorId !== req.auth!.userId) return res.status(403).json({ error: { message: "You can only edit your own messages" } });
+    const message = await prisma.directMessage.update({
+      where: { id: existing.id },
+      data: { content: body.data.content, editedAt: new Date() },
+      include: { author: { select: { id: true, username: true, tag: true, displayName: true } }, attachments: true, reactions: { select: { emoji: true, userId: true } } }
+    });
+    getRealtimeServer()?.to("conversation:" + req.params.conversationId).emit("direct-message:update", { conversationId: req.params.conversationId, message });
+    res.json({ message });
+  } catch (e) { next(e); }
+});
+
+featuresRouter.delete("/conversations/:conversationId/messages/:messageId", async (req, res, next) => {
+  try {
+    const member = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: req.params.conversationId, userId: req.auth!.userId } } });
+    if (!member) return res.status(404).json({ error: { message: "Conversation not found" } });
+    const existing = await prisma.directMessage.findFirst({ where: { id: req.params.messageId, conversationId: req.params.conversationId } });
+    if (!existing) return res.status(404).json({ error: { message: "Message not found" } });
+    if (existing.authorId !== req.auth!.userId) return res.status(403).json({ error: { message: "You can only delete your own messages" } });
+    await prisma.directMessage.delete({ where: { id: existing.id } });
+    getRealtimeServer()?.to("conversation:" + req.params.conversationId).emit("direct-message:delete", { conversationId: req.params.conversationId, id: existing.id });
+    res.status(204).end();
+  } catch (e) { next(e); }
+});
+
+featuresRouter.post("/conversations/:conversationId/messages/:messageId/reactions", async (req, res, next) => {
+  try {
+    const body = z.object({ emoji: z.string().trim().min(1).max(32) }).strict().safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: { message: "Choose a valid reaction" } });
+    const member = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: req.params.conversationId, userId: req.auth!.userId } } });
+    if (!member) return res.status(404).json({ error: { message: "Conversation not found" } });
+    const message = await prisma.directMessage.findFirst({ where: { id: req.params.messageId, conversationId: req.params.conversationId } });
+    if (!message) return res.status(404).json({ error: { message: "Message not found" } });
+    const existing = await prisma.directMessageReaction.findUnique({ where: { directMessageId_userId_emoji: { directMessageId: message.id, userId: req.auth!.userId, emoji: body.data.emoji } } });
+    if (existing) await prisma.directMessageReaction.delete({ where: { id: existing.id } });
+    else await prisma.directMessageReaction.create({ data: { directMessageId: message.id, userId: req.auth!.userId, emoji: body.data.emoji } });
+    const updated = await prisma.directMessage.findUnique({
+      where: { id: message.id },
+      include: { author: { select: { id: true, username: true, tag: true, displayName: true } }, attachments: true, reactions: { select: { emoji: true, userId: true } } }
+    });
+    if (updated) getRealtimeServer()?.to("conversation:" + req.params.conversationId).emit("direct-message:update", { conversationId: req.params.conversationId, message: updated });
+    res.json({ reactions: updated?.reactions || [] });
   } catch (e) { next(e); }
 });
 

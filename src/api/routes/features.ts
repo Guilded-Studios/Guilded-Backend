@@ -382,6 +382,31 @@ featuresRouter.get("/servers/:serverId/audit-log", async (req, res, next) => {
     res.json({ entries });
   } catch (e) { next(e); }
 });
+featuresRouter.get("/servers/:serverId/bans", async (req, res, next) => {
+  try {
+    if (!await can(req.params.serverId, req.auth!.userId, "MODERATE_MEMBERS")) {
+      return res.status(403).json({ error: { message: "You cannot view server bans" } });
+    }
+    const records = await prisma.moderationRecord.findMany({
+      where: { serverId: req.params.serverId, action: { in: ["BAN", "UNBAN"] } },
+      orderBy: { createdAt: "desc" },
+      include: {
+        target: { select: { id: true, username: true, tag: true, displayName: true, avatarUrl: true } },
+        actor: { select: { id: true, username: true, tag: true, displayName: true } }
+      }
+    });
+    const latestByUser = new Map<string, typeof records[number]>();
+    for (const record of records) {
+      if (!latestByUser.has(record.targetUserId)) latestByUser.set(record.targetUserId, record);
+    }
+    const now = new Date();
+    const bans = [...latestByUser.values()].filter(record =>
+      record.action === "BAN" && (!record.expiresAt || record.expiresAt > now)
+    );
+    res.json({ bans });
+  } catch (e) { next(e); }
+});
+
 featuresRouter.post("/servers/:serverId/moderation", async (req, res, next) => {
   try {
     if (!await can(req.params.serverId, req.auth!.userId, "MODERATE_MEMBERS")) return res.status(403).json({ error: { message: "You cannot moderate members" } });

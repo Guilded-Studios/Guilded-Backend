@@ -37,33 +37,39 @@ usersRouter.post("/me/media/sign", async (request, response, next) => {
       return;
     }
     const url = env.SUPABASE_URL.replace(/\/$/, "");
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    // Support both the legacy service-role variable and Supabase's newer secret-key variable.
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
     if (!key) {
-      response.status(503).json({ error: { code: "STORAGE_NOT_CONFIGURED", message: "Profile image uploads are not configured on this server." } });
+      response.status(503).json({ error: { code: "STORAGE_NOT_CONFIGURED", message: "Profile image storage is not configured. Add SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY) to the backend environment." } });
       return;
     }
     const extension = ({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" } as const)[parsed.data.mimeType];
     const storageKey = request.auth!.userId + "/" + parsed.data.kind + "/" + randomUUID() + "." + extension;
     const bucket = "guilded-profile-media";
-    const signed = await fetch(url + "/storage/v1/object/upload/sign/" + bucket + "/" + storageKey.split("/").map(encodeURIComponent).join("/"), {
+    const encodedKey = storageKey.split("/").map(encodeURIComponent).join("/");
+    const signed = await fetch(new URL("/storage/v1/object/upload/sign/" + bucket + "/" + encodedKey, url), {
       method: "POST",
       headers: { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" },
       body: JSON.stringify({ upsert: false })
     });
     if (!signed.ok) {
-      response.status(502).json({ error: { code: "STORAGE_SIGN_FAILED", message: "Storage could not create an upload link." } });
+      const detail = await signed.text().catch(() => "");
+      response.status(502).json({ error: { code: "STORAGE_SIGN_FAILED", message: "Storage could not create an upload link (" + signed.status + "). " + detail.slice(0, 300) } });
       return;
     }
-    const payload = await signed.json() as { url?: string; signedURL?: string; token?: string };
-    const signedPath = payload.url || payload.signedURL;
+    const payload = await signed.json() as { url?: string; signedURL?: string; signedUrl?: string; token?: string };
+    const signedPath = payload.url || payload.signedURL || payload.signedUrl;
     if (!signedPath) {
       response.status(502).json({ error: { code: "STORAGE_INVALID_RESPONSE", message: "Storage returned an invalid upload link." } });
       return;
     }
+    const uploadUrl = /^https?:\\/\\//i.test(signedPath)
+      ? signedPath
+      : new URL(signedPath.startsWith("/storage/v1/") ? signedPath : "/storage/v1" + (signedPath.startsWith("/") ? signedPath : "/" + signedPath), url).toString();
     response.json({
       storageKey,
-      uploadUrl: signedPath.startsWith("http") ? signedPath : url + "/storage/v1" + signedPath,
-      publicUrl: url + "/storage/v1/object/public/" + bucket + "/" + storageKey.split("/").map(encodeURIComponent).join("/"),
+      uploadUrl,
+      publicUrl: new URL("/storage/v1/object/public/" + bucket + "/" + encodedKey, url).toString(),
       mimeType: parsed.data.mimeType
     });
   } catch (error) { next(error); }
